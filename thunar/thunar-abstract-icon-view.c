@@ -441,7 +441,7 @@ thunar_abstract_icon_view_button_press_event (XfceIconView           *view,
           if (!xfce_icon_view_path_is_selected (view, path))
             {
               /* we don't unselect all other items if Control is active */
-              if ((event->state & GDK_CONTROL_MASK) == 0)
+              if ((event->state & gtk_widget_get_modifier_mask (GTK_WIDGET (view), GDK_MODIFIER_INTENT_MODIFY_SELECTION)) == 0)
                 xfce_icon_view_unselect_all (view);
               xfce_icon_view_select_path (view, path);
             }

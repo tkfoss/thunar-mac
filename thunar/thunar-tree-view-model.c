@@ -1391,7 +1391,12 @@ thunar_tree_view_model_get_value (GtkTreeModel *model,
           g_value_set_static_string (value, "");
           break;
         }
+#ifdef __APPLE__
+      /* content types are UTIs on macOS, show the MIME type where known */
+      g_value_take_string (value, thunar_g_content_type_get_mime_type (thunar_file_get_content_type (file)));
+#else
       g_value_set_static_string (value, thunar_file_get_content_type (file));
+#endif
       break;
 
     case THUNAR_COLUMN_NAME:

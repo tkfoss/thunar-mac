@@ -1,0 +1,233 @@
+# Build Thunar for macOS (arm64), test it headlessly, and package Thunar.app as a DMG.
+#
+# - Pull requests and pushes to main that touch the source: build, test, DMG artifact.
+# - Tags v*: additionally a GitHub Release with the DMG and a source/licensing note.
+# - workflow_dispatch: manual run.
+#
+# The Xfce dependencies (macos/deps/REVISIONS) are cached as an installed prefix,
+# keyed on macos/deps/* and the Homebrew versions they were built against.
+#
+# Signing and notarization run only when the secrets exist (see README-macOS.md):
+#   MACOS_CERT_P12, MACOS_CERT_PASSWORD, MACOS_SIGN_IDENTITY  (Developer ID Application)
+#   AC_API_KEY_ID, AC_API_ISSUER_ID, AC_API_KEY_P8             (App Store Connect API key)
+# Without them the app and the DMG are ad-hoc signed.
+
+name: macOS
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'thunar/**'
+      - 'thunarx/**'
+      - 'thunar-uca/**'
+      - 'plugins/**'
+      - 'macos/**'
+      - 'po/**'
+      - 'icons/**'
+      - 'meson.build'
+      - 'meson_options.txt'
+      - '*.in'
+      - '.github/workflows/macos.yml'
+  push:
+    branches: [main]
+    tags: ['v*']   # paths filters don't apply to tag pushes
+    paths:
+      - 'thunar/**'
+      - 'thunarx/**'
+      - 'thunar-uca/**'
+      - 'plugins/**'
+      - 'macos/**'
+      - 'po/**'
+      - 'icons/**'
+      - 'meson.build'
+      - 'meson_options.txt'
+      - '*.in'
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write   # releases on tags
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      PREFIX: /Users/runner/thunar-ci/prefix
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+      HOMEBREW_NO_ANALYTICS: 1
+      HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
+      HAVE_SIGNING: ${{ secrets.MACOS_CERT_P12 != '' && secrets.MACOS_SIGN_IDENTITY != '' }}
+      HAVE_NOTARY: ${{ secrets.MACOS_CERT_P12 != '' && secrets.AC_API_KEY_P8 != '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Homebrew dependencies
+        id: brew
+        run: |
+          brew bundle --file=macos/deps/Brewfile
+          formulae=$(brew bundle list --file=macos/deps/Brewfile --formula)
+          echo "hash=$(brew list --versions $formulae | shasum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          mkdir -p dist
+          brew list --versions > dist/brew-versions.txt
+          sw_vers
+
+      - name: Restore Xfce dependencies
+        id: deps-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.PREFIX }}
+          key: xfce-deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('macos/deps/**') }}-${{ steps.brew.outputs.hash }}
+
+      - name: Build Xfce dependencies
+        run: macos/build.sh --prefix "$PREFIX" --src "$RUNNER_TEMP/src" --deps-only
+
+      - name: Save Xfce dependencies
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.PREFIX }}
+          key: ${{ steps.deps-cache.outputs.cache-primary-key }}
+
+      - name: Build Thunar
+        run: macos/build.sh --prefix "$PREFIX" --src "$RUNNER_TEMP/src" --builddir build-ci
+
+      - name: Smoke test
+        run: macos/deps/with-dbus.sh --prefix "$PREFIX" thunar --version
+
+      - name: Version
+        id: version
+        run: |
+          version=$(plutil -extract CFBundleShortVersionString raw "$PREFIX/share/Thunar/macos/Info.plist")
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$version-$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Import signing certificate
+        if: env.HAVE_SIGNING == 'true'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          kcpass=$(openssl rand -base64 24)
+          security create-keychain -p "$kcpass" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$kcpass" "$keychain"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kcpass" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$keychain"
+
+      - name: Thunar.app
+        env:
+          SIGN_IDENTITY: ${{ env.HAVE_SIGNING == 'true' && secrets.MACOS_SIGN_IDENTITY || '-' }}
+        run: |
+          macos/make-app-bundle.sh --prefix "$PREFIX" --sign "$SIGN_IDENTITY" dist/Thunar.app
+          du -sh dist/Thunar.app
+          cp dist/Thunar.app/Contents/Resources/bundled-libraries.txt dist/
+
+      - name: Test Thunar.app
+        run: macos/tests/test-bundle.sh --prefix "$PREFIX" dist/Thunar.app
+
+      - name: Notarize Thunar.app
+        if: env.HAVE_NOTARY == 'true'
+        env:
+          AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+          AC_API_ISSUER_ID: ${{ secrets.AC_API_ISSUER_ID }}
+          AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
+        run: |
+          echo "$AC_API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          ditto -c -k --keepParent dist/Thunar.app "$RUNNER_TEMP/Thunar.zip"
+          macos/notarize.sh "$RUNNER_TEMP/Thunar.zip"
+          xcrun stapler staple dist/Thunar.app
+
+      - name: DMG
+        env:
+          SIGN_IDENTITY: ${{ env.HAVE_SIGNING == 'true' && secrets.MACOS_SIGN_IDENTITY || '' }}
+        run: |
+          macos/make-dmg.sh --version "${{ steps.version.outputs.version }}" ${SIGN_IDENTITY:+--sign "$SIGN_IDENTITY"} dist/Thunar.app dist
+          hdiutil imageinfo dist/*.dmg | grep -E '^Format|Checksum Type' | head -3
+
+      - name: Notarize DMG
+        if: env.HAVE_NOTARY == 'true'
+        env:
+          AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+          AC_API_ISSUER_ID: ${{ secrets.AC_API_ISSUER_ID }}
+        run: |
+          macos/notarize.sh dist/*.dmg
+          xcrun stapler staple dist/*.dmg
+
+      - name: Check the DMG
+        run: |
+          mnt="$RUNNER_TEMP/dmg"
+          hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$mnt" dist/*.dmg
+          ls -la "$mnt"
+          test -L "$mnt/Applications"
+          codesign --verify --deep --strict --verbose=2 "$mnt/Thunar.app"
+          env -i HOME="$HOME" PATH=/usr/bin:/bin "$mnt/Thunar.app/Contents/MacOS/Thunar" --version
+          if [ "$HAVE_SIGNING" = true ]; then
+            spctl --assess --type execute --verbose=4 "$mnt/Thunar.app" || true
+            spctl --assess --type open --context context:primary-signature --verbose=4 dist/*.dmg || true
+          fi
+          hdiutil detach "$mnt"
+          ls -lh dist
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: Thunar-${{ steps.version.outputs.version }}-arm64
+          path: |
+            dist/*.dmg
+            dist/brew-versions.txt
+            dist/bundled-libraries.txt
+          retention-days: 14
+          compression-level: 0
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          minos=$(plutil -extract LSMinimumSystemVersion raw dist/Thunar.app/Contents/Info.plist)
+          if [ "$HAVE_NOTARY" = true ]; then
+            signing="Signed with a Developer ID and notarized by Apple."
+          else
+            signing="Ad-hoc signed, not notarized: macOS blocks the first launch. Open Thunar once, then click \"Open Anyway\" in System Settings → Privacy & Security, or run \`xattr -dr com.apple.quarantine /Applications/Thunar.app\`."
+          fi
+          src="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          cat > dist/release-notes.md <<EOF
+          Thunar $VERSION for macOS on Apple Silicon (arm64), macOS $minos or later.
+
+          $signing
+
+          ### Source code and licenses
+          Thunar is free software under the GNU GPL v2 or later (libthunarx: LGPL v2 or later).
+          - Source code of this release: [$GITHUB_REF_NAME]($src/tree/$GITHUB_REF_NAME)
+            ([tar.gz]($src/archive/refs/tags/$GITHUB_REF_NAME.tar.gz)).
+          - The bundled Xfce libraries (libxfce4util, xfconf, libxfce4ui) are built from the git revisions in
+            [macos/deps/REVISIONS]($src/blob/$GITHUB_REF_NAME/macos/deps/REVISIONS) with the patches in
+            [macos/deps]($src/tree/$GITHUB_REF_NAME/macos/deps).
+          - GTK, GLib and the other bundled libraries are unmodified Homebrew bottles (sources: https://formulae.brew.sh).
+            Their exact versions are in \`bundled-libraries.txt\` (also in \`Thunar.app/Contents/Resources\`);
+            all Homebrew versions of the build machine are in \`brew-versions.txt\`.
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/bundled-libraries.txt dist/brew-versions.txt \
+            --title "Thunar $VERSION for macOS" --notes-file dist/release-notes.md
+
+      - name: Remove the signing keychain
+        if: always() && env.HAVE_SIGNING == 'true'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/AuthKey.p8"

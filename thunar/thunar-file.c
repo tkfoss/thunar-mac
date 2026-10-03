@@ -49,6 +49,7 @@
 #include <unistd.h>
 #endif
 
+#include "thunar/thunar-app-info.h"
 #include "thunar/thunar-application.h"
 #include "thunar/thunar-chooser-dialog.h"
 #include "thunar/thunar-dialogs.h"
@@ -615,7 +616,8 @@ thunar_file_info_get_uri_scheme (ThunarxFileInfo *file_info)
 static gchar *
 thunar_file_info_get_mime_type (ThunarxFileInfo *file_info)
 {
-  return g_strdup (thunar_file_get_content_type (THUNAR_FILE (file_info)));
+  /* the thunarx API promises a MIME type, content types are UTIs on macOS */
+  return thunar_g_content_type_get_mime_type (thunar_file_get_content_type (THUNAR_FILE (file_info)));
 }
 
 
@@ -627,7 +629,8 @@ thunar_file_info_has_mime_type (ThunarxFileInfo *file_info,
   if (THUNAR_FILE (file_info)->info == NULL)
     return FALSE;
 
-  return g_content_type_is_a (thunar_file_get_content_type (THUNAR_FILE (file_info)), mime_type);
+  /* same as g_content_type_is_a() on Unix, converts MIME to UTI on macOS */
+  return g_content_type_is_mime_type (thunar_file_get_content_type (THUNAR_FILE (file_info)), mime_type);
 }
 
 
@@ -2597,7 +2600,7 @@ thunar_file_get_content_type_desc (ThunarFile *file,
     return g_strdup ("");
 
   /* handle broken symlink */
-  if (G_UNLIKELY (g_content_type_equals (content_type, "inode/symlink")))
+  if (G_UNLIKELY (g_content_type_equals (content_type, THUNAR_CONTENT_TYPE_SYMLINK)))
     return g_strdup (_("broken link"));
 
   /* append " (link to <target>)" to description if link is not broken */
@@ -2640,7 +2643,7 @@ thunar_file_load_content_type (ThunarFile *file)
   if (G_UNLIKELY (file->kind == G_FILE_TYPE_DIRECTORY))
     {
       /* this we known for sure */
-      thunar_file_set_content_type (file, "inode/directory");
+      thunar_file_set_content_type (file, THUNAR_CONTENT_TYPE_DIRECTORY);
       return;
     }
 
@@ -2788,7 +2791,7 @@ thunar_file_get_default_handler (const ThunarFile *file)
       must_support_uris = (path == NULL);
       g_free (path);
 
-      app_info = g_app_info_get_default_for_type (content_type, must_support_uris);
+      app_info = thunar_app_info_get_default_for_type (content_type, must_support_uris);
     }
 
   if (app_info == NULL)
@@ -3137,13 +3140,13 @@ thunar_file_can_execute (ThunarFile *file,
         }
 
       /* do never execute plain text files which are not shell scripts but marked executable */
-      if (g_content_type_equals (content_type, "text/plain") || g_content_type_equals (content_type, "application/json") || g_content_type_equals (content_type, "application/xml"))
+      if (thunar_g_content_type_equals_mime_type (content_type, "text/plain") || thunar_g_content_type_equals_mime_type (content_type, "application/json") || thunar_g_content_type_equals_mime_type (content_type, "application/xml"))
         {
           g_object_unref (file_to_check);
           return FALSE;
         }
 
-      if (g_content_type_is_a (content_type, "text/plain"))
+      if (g_content_type_is_mime_type (content_type, "text/plain"))
         {
           /* check if the shell scripts should be executed or opened by default */
           preferences = thunar_preferences_get ();
@@ -4225,7 +4228,7 @@ thunar_file_get_icon_name (ThunarFile         *file,
     return NULL;
 
   /* lookup for content type, just like gio does for local files */
-  icon = g_content_type_get_icon (thunar_file_get_content_type (file));
+  icon = thunar_g_content_type_get_icon (thunar_file_get_content_type (file));
   if (G_LIKELY (icon != NULL))
     {
 check_icon:
@@ -4756,10 +4759,10 @@ thunar_file_list_get_applications (GList *file_list)
       /* determine the list of applications that can open this file */
       if (G_UNLIKELY (current_type != NULL))
         {
-          list = g_app_info_get_all_for_type (current_type);
+          list = thunar_app_info_get_all_for_type (current_type);
 
           /* move any default application in front of the list */
-          default_application = g_app_info_get_default_for_type (current_type, FALSE);
+          default_application = thunar_app_info_get_default_for_type (current_type, FALSE);
           if (G_LIKELY (default_application != NULL))
             {
               for (ap = list; ap != NULL; ap = ap->next)

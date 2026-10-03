@@ -57,6 +57,10 @@
 #include <libxfce4ui/libxfce4ui.h>
 #include <libxfce4util/libxfce4util.h>
 
+#ifdef __APPLE__
+#include "tse-macos.h"
+#endif
+
 
 
 typedef struct _TseData TseData;
@@ -162,7 +166,7 @@ tse_file_is_archive (GFileInfo *file_info)
   for (n = 0; n < G_N_ELEMENTS (TSE_MIME_TYPES); ++n)
     {
       /* check if this mime type matches */
-      if (g_content_type_is_a (content_type, TSE_MIME_TYPES[n]))
+      if (g_content_type_is_mime_type (content_type, TSE_MIME_TYPES[n])) /* converts to UTI on macOS */
         {
           /* yep, that's a match then */
           return TRUE;
@@ -662,6 +666,20 @@ main (int argc, char **argv)
   /* check if we have anything to attach */
   if (G_LIKELY (attachments != NULL))
     {
+#ifdef __APPLE__
+      /* no MailReader preferred application on macOS, use the system mail client */
+      if (!tse_macos_compose_email (attachments, &error))
+        {
+          tse_error (error, _("Failed to compose new email"));
+          g_error_free (error);
+        }
+      g_strfreev (attachments);
+      attachments = NULL;
+    }
+
+  if (G_LIKELY (attachments != NULL))
+    {
+#endif
       /* no specific email address */
       mailto = g_string_new ("?");
       for (n = 0; attachments[n] != NULL; ++n)

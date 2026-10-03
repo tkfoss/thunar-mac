@@ -118,7 +118,7 @@ typedef enum
 #define THUNAR_FILE_EMBLEM_NAME_CANT_WRITE "emblem-readonly"
 #define THUNAR_FILE_EMBLEM_NAME_DESKTOP "emblem-desktop"
 
-#define DEFAULT_CONTENT_TYPE "application/octet-stream"
+#define DEFAULT_CONTENT_TYPE THUNAR_CONTENT_TYPE_UNKNOWN
 
 
 

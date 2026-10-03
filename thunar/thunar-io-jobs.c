@@ -29,6 +29,9 @@
 #include "thunar/thunar-gobject-extensions.h"
 #include "thunar/thunar-io-jobs-util.h"
 #include "thunar/thunar-io-jobs.h"
+#ifdef __APPLE__
+#include "thunar/thunar-macos.h"
+#endif
 #include "thunar/thunar-io-scan-directory.h"
 #include "thunar/thunar-job.h"
 #include "thunar/thunar-preferences.h"
@@ -1023,7 +1026,11 @@ _thunar_io_jobs_trash (ThunarJob *job,
       _thunar_assert (G_IS_FILE (lp->data));
 
       /* trash the file or folder */
+#ifdef __APPLE__
+      thunar_macos_trash_file (lp->data, thunar_job_get_cancellable (THUNAR_JOB (job)), &err);
+#else
       g_file_trash (lp->data, thunar_job_get_cancellable (THUNAR_JOB (job)), &err);
+#endif
 
       if (err != NULL)
         {

@@ -362,7 +362,7 @@ thunar_tree_view_class_init (ThunarTreeViewClass *klass)
 
   /* setup the key bindings for the tree view */
   binding_set = gtk_binding_set_by_class (klass);
-  gtk_binding_entry_add_signal (binding_set, GDK_KEY_BackSpace, GDK_CONTROL_MASK, "delete-selected-files", 0);
+  gtk_binding_entry_add_signal (binding_set, GDK_KEY_BackSpace, THUNAR_PRIMARY_BINDING_MASK, "delete-selected-files", 0);
   gtk_binding_entry_add_signal (binding_set, GDK_KEY_Delete, 0, "delete-selected-files", 0);
   gtk_binding_entry_add_signal (binding_set, GDK_KEY_Delete, GDK_SHIFT_MASK, "delete-selected-files", 0);
   gtk_binding_entry_add_signal (binding_set, GDK_KEY_KP_Delete, 0, "delete-selected-files", 0);
@@ -845,7 +845,7 @@ thunar_tree_view_button_release_event (GtkWidget      *widget,
               g_object_get (view->preferences, "misc-middle-click-in-tab", &in_tab, NULL);
 
               /* holding ctrl inverts the action */
-              if ((event->state & GDK_CONTROL_MASK) != 0)
+              if ((event->state & gtk_widget_get_modifier_mask (GTK_WIDGET (view), GDK_MODIFIER_INTENT_PRIMARY_ACCELERATOR)) != 0)
                 in_tab = !in_tab;
 
               files = g_list_append (files, file);

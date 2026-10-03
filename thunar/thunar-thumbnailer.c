@@ -861,6 +861,11 @@ thunar_thumbnailer_file_is_supported (ThunarThumbnailer *thumbnailer,
 
   /* lookup the content type, no difficult parent type matching here */
   schemes_array = g_hash_table_lookup (thumbnailer->supported, content_type);
+
+  /* thumbnailers that decide per file (e.g. Quick Look on macOS) announce "*";
+   * only regular files are sent to them */
+  if (schemes_array == NULL && !thunar_file_is_directory (file))
+    schemes_array = g_hash_table_lookup (thumbnailer->supported, "*");
   if (schemes_array != NULL)
     {
       /* go through all the URI schemes this type supports */

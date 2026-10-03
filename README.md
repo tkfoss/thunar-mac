@@ -1,3 +1,9 @@
+> **macOS port:** this repository contains a native macOS port of Thunar (GTK3 Quartz, no X11).
+> See [README-macOS.md](README-macOS.md) for its status, how to build it and how to run it.
+> Upstream's README follows.
+
+![Thunar running natively on macOS](docs/macos-screenshot.png)
+
 [![License](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://gitlab.xfce.org/xfce/thunar/COPYING)
 
 # thunar

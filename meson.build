@@ -84,6 +84,10 @@ endif
 gio_unix = dependency('gio-unix-2.0', version: dependency_versions['glib'], required: get_option('gio-unix'))
 if gio_unix.found()
   feature_cflags += '-DHAVE_GIO_UNIX=1'
+  # GDesktopAppInfo is part of gio-unix on Linux/BSD, but not available on macOS
+  if cc.has_header('gio/gdesktopappinfo.h', dependencies: gio_unix)
+    feature_cflags += '-DHAVE_GIO_DESKTOP_APP_INFO=1'
+  endif
 endif
 
 vte = dependency('vte-2.91', required: get_option('terminal'))
@@ -132,6 +136,9 @@ if helper_path_prefix == ''
   helper_path_prefix = get_option('prefix') / get_option('libdir')
 endif
 
+# GModule loads plugins with G_MODULE_SUFFIX, which is "so" on macOS too
+thunarx_module_suffix = host_machine.system() == 'darwin' ? 'so' : []
+
 thunarx_dirs = get_option('thunarx-dirs')
 if thunarx_dirs == ''
   thunarx_dirs = get_option('prefix') / get_option('libdir') / 'thunarx-@0@'.format(thunarx_version_api)
@@ -156,6 +163,10 @@ functions = [
   'strptime',
 ]
 foreach function : functions
+  # setgroupent/setpassent exist in libc on macOS but aren't usable from headers in our C mode
+  if host_machine.system() == 'darwin' and function in ['setgroupent', 'setpassent']
+    continue
+  endif
   if cc.has_function(function)
     feature_cflags += '-DHAVE_@0@=1'.format(function.to_upper())
   endif
@@ -253,7 +264,6 @@ extra_cflags += [
   '-DPACKAGE_STRING="@0@ @1@"'.format(meson.project_name(), meson.project_version()),
   '-DPACKAGE_DATADIR="@0@"'.format(pkgdatadir),
   '-DCOPYRIGHT_YEAR="@0@"'.format(copyright_year),
-  '-DPACKAGE_LOCALE_DIR="@0@"'.format(get_option('prefix') / get_option('localedir')),
   '-DPACKAGE_BUGREPORT="https://gitlab.xfce.org/@0@/@1@/-/issues"'.format(project_namespace, meson.project_name()),
   '-DGETTEXT_PACKAGE="@0@"'.format(meson.project_name()),
   '-DPREFIX="@0@"'.format(get_option('prefix')),
@@ -268,6 +278,13 @@ extra_cflags += [
   '-DSYSCONFDIR="@0@"'.format(get_option('prefix') / get_option('sysconfdir')),
   '-DHAVE_XFCE_REVISION_H=1',
 ]
+
+# macOS: translations can be relocated (Thunar.app) with $XFCE_LOCALEDIR
+if host_machine.system() == 'darwin'
+  extra_cflags += '-DPACKAGE_LOCALE_DIR=(g_getenv ("XFCE_LOCALEDIR") != NULL ? g_getenv ("XFCE_LOCALEDIR") : "@0@")'.format(get_option('prefix') / get_option('localedir'))
+else
+  extra_cflags += '-DPACKAGE_LOCALE_DIR="@0@"'.format(get_option('prefix') / get_option('localedir'))
+endif
 
 add_project_arguments(cc.get_supported_arguments(extra_cflags_check), language: 'c')
 add_project_arguments(extra_cflags, language: 'c')
@@ -374,6 +391,10 @@ if not get_option('thunar-wallpaper').disabled()
 endif
 subdir('po')
 subdir('thunar')
+if host_machine.system() == 'darwin'
+  add_languages('objc', native: false, required: true)
+  subdir('macos')
+endif
 if get_option('tests')
   subdir('tests')
 endif

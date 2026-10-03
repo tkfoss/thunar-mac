@@ -126,7 +126,7 @@ thunar_dialogs_show_create (gpointer     parent,
 
   /* try to load the icon */
   if (G_LIKELY (content_type != NULL))
-    icon = g_content_type_get_icon (content_type);
+    icon = thunar_g_content_type_get_icon (content_type);
 
   /* setup the image */
   if (G_LIKELY (icon != NULL))

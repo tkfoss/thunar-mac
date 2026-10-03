@@ -25,6 +25,7 @@
 #include <string.h>
 #endif
 
+#include "thunar/thunar-app-info.h"
 #include "thunar/thunar-chooser-model.h"
 #include "thunar/thunar-gobject-extensions.h"
 #include "thunar/thunar-icon-factory.h"
@@ -291,7 +292,7 @@ thunar_chooser_model_reload (ThunarChooserModel *model)
   gtk_tree_store_clear (GTK_TREE_STORE (model));
 
   /* get default application for this type and append it in @default_app */
-  default_app = g_list_prepend (default_app, g_app_info_get_default_for_type (model->content_type, FALSE));
+  default_app = g_list_prepend (default_app, thunar_app_info_get_default_for_type (model->content_type, FALSE));
 
   /* If default application was already selected, then display it in Treeview */
   if (default_app->data)
@@ -303,7 +304,7 @@ thunar_chooser_model_reload (ThunarChooserModel *model)
     }
 
   /* check if we have any applications for this type */
-  recommended = g_app_info_get_all_for_type (model->content_type);
+  recommended = thunar_app_info_get_all_for_type (model->content_type);
 
   /* append them as recommended */
   recommended = g_list_sort (recommended, sort_app_infos);
@@ -312,7 +313,7 @@ thunar_chooser_model_reload (ThunarChooserModel *model)
                                "org.xfce.settings.default-applications",
                                recommended);
 
-  all = g_app_info_get_all ();
+  all = thunar_app_info_get_all ();
   for (lp = all; lp != NULL; lp = lp->next)
     {
       if (g_list_find_custom (recommended,
@@ -418,8 +419,9 @@ thunar_chooser_model_remove (ThunarChooserModel *model,
                                              error);
 
   /* try to delete the file */
-  if (delete &&succeed && g_app_info_delete (app_info))
+  if (delete && succeed && !g_app_info_delete (app_info))
     {
+      succeed = FALSE;
       g_set_error (error, G_IO_ERROR,
                    G_IO_ERROR_FAILED,
                    _("Failed to remove \"%s\"."),

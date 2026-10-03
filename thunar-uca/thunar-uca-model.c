@@ -1083,6 +1083,25 @@ thunar_uca_model_match (ThunarUcaModel *uca_model,
       files[n].name = thunarx_file_info_get_name (lp->data);
       files[n].types = types_from_mime_type (mime_type);
 
+#ifdef __APPLE__
+      /* content types are UTIs on macOS and many (e.g. public.c-source,
+       * org.matroska.mkv) have no MIME type; has_mime_type() checks UTI
+       * conformance (public.text, public.movie, ...) */
+      if (files[n].types == 0)
+        {
+          if (thunarx_file_info_is_directory (lp->data))
+            files[n].types = THUNAR_UCA_TYPE_DIRECTORIES;
+          else if (thunarx_file_info_has_mime_type (lp->data, "audio/*"))
+            files[n].types = THUNAR_UCA_TYPE_AUDIO_FILES;
+          else if (thunarx_file_info_has_mime_type (lp->data, "image/*"))
+            files[n].types = THUNAR_UCA_TYPE_IMAGE_FILES;
+          else if (thunarx_file_info_has_mime_type (lp->data, "video/*"))
+            files[n].types = THUNAR_UCA_TYPE_VIDEO_FILES;
+          else if (thunarx_file_info_has_mime_type (lp->data, "text/*"))
+            files[n].types = THUNAR_UCA_TYPE_TEXT_FILES;
+        }
+#endif
+
       if (G_UNLIKELY (files[n].types == 0))
         files[n].types = THUNAR_UCA_TYPE_OTHER_FILES;
 

@@ -25,12 +25,17 @@
 #include <string.h>
 #endif
 
-#ifdef HAVE_GIO_UNIX
+#ifdef HAVE_GIO_DESKTOP_APP_INFO
 #include <gio/gdesktopappinfo.h>
 #endif
 
+#include "thunar/thunar-gio-extensions.h"
 #include "thunar/thunar-private.h"
 #include "thunar/thunar-sendto-model.h"
+
+#ifdef __APPLE__
+#include "thunar/thunar-macos-app-info.h"
+#endif
 
 #include <libxfce4util/libxfce4util.h>
 
@@ -122,8 +127,8 @@ g_app_info_compare (gpointer a,
 static void
 thunar_sendto_model_load (ThunarSendtoModel *sendto_model)
 {
-#ifdef HAVE_GIO_UNIX
-  GDesktopAppInfo *app_info = NULL;
+#if defined(HAVE_GIO_DESKTOP_APP_INFO) || defined(__APPLE__)
+  GAppInfo *app_info = NULL;
 #endif
   gchar   **specs;
   gchar    *path;
@@ -147,14 +152,19 @@ thunar_sendto_model_load (ThunarSendtoModel *sendto_model)
               continue;
             }
 
-#ifdef HAVE_GIO_UNIX
-          app_info = g_desktop_app_info_new_from_keyfile (key_file);
+#if defined(HAVE_GIO_DESKTOP_APP_INFO) || defined(__APPLE__)
+#ifdef HAVE_GIO_DESKTOP_APP_INFO
+          app_info = G_APP_INFO (g_desktop_app_info_new_from_keyfile (key_file));
+#else
+          /* no GDesktopAppInfo on macOS, use our own command app info */
+          app_info = thunar_macos_app_info_new_from_keyfile (key_file, path);
+#endif
 
           if (G_LIKELY (app_info != NULL))
             {
               /* add to our handler list, sorted by their desktop-ids (reverse order) */
               sendto_model->handlers = g_list_insert_sorted (sendto_model->handlers,
-                                                             G_APP_INFO (app_info),
+                                                             app_info,
                                                              (GCompareFunc) (void (*) (void)) g_app_info_compare);
 
               /* attach the mime-types to the object */
@@ -327,7 +337,7 @@ thunar_sendto_model_get_matching (ThunarSendtoModel *sendto_model,
               for (n = 0; mime_types[n] != NULL; ++n)
                 {
                   content_type = thunar_file_get_content_type (fp->data);
-                  if (g_content_type_equals (content_type, mime_types[n]))
+                  if (thunar_g_content_type_equals_mime_type (content_type, mime_types[n]))
                     break;
                 }
 

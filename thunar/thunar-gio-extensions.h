@@ -217,6 +217,32 @@ thunar_g_file_get_metadata_setting (GFile       *file,
                                     const gchar *setting_name);
 char *
 thunar_g_file_get_content_type (GFile *file);
+
+/* Content types are MIME types on Unix but UTIs (e.g. "public.jpeg") on
+ * macOS. Use these constants/helpers instead of hardcoded MIME strings. */
+#ifdef __APPLE__
+#define THUNAR_CONTENT_TYPE_DIRECTORY "public.folder"
+#define THUNAR_CONTENT_TYPE_SYMLINK "public.symlink"
+#define THUNAR_CONTENT_TYPE_PLAIN_TEXT "public.plain-text"
+#define THUNAR_CONTENT_TYPE_UNKNOWN "public.data"
+#else
+#define THUNAR_CONTENT_TYPE_DIRECTORY "inode/directory"
+#define THUNAR_CONTENT_TYPE_SYMLINK "inode/symlink"
+#define THUNAR_CONTENT_TYPE_PLAIN_TEXT "text/plain"
+#define THUNAR_CONTENT_TYPE_UNKNOWN "application/octet-stream"
+#endif
+gchar *
+thunar_g_content_type_from_mime_type (const gchar *mime_type);
+gchar *
+thunar_g_content_type_get_mime_type (const gchar *content_type);
+gboolean
+thunar_g_content_type_equals_mime_type (const gchar *content_type,
+                                        const gchar *mime_type);
+gboolean
+thunar_g_content_type_is_media (const gchar *content_type,
+                                const gchar *media);
+GIcon *
+thunar_g_content_type_get_icon (const gchar *content_type);
 void
 thunar_g_update_user_special_dir (GFile       *file,
                                   const gchar *xdg_name);

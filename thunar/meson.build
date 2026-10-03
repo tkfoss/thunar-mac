@@ -187,6 +187,25 @@ if vte.found()
   thunar_sources += ['thunar-terminal-widget.c', 'thunar-terminal-widget.h']
 endif
 
+thunar_sources += ['thunar-app-info.h']
+
+thunar_objc_args = []
+if host_machine.system() == 'darwin'
+  add_languages('objc', native: false, required: true)
+  thunar_sources += [
+    'thunar-macos.h',
+    'thunar-macos-app-info.c',
+    'thunar-macos-app-info.h',
+    'thunar-macos-bundle.c',
+    'thunar-macos-launch.m',
+    'thunar-macos-trash.c',
+    'thunar-macos-volume-monitor.c',
+    'thunar-macos-volumes.m',
+    'thunar-macos-utils.m',
+  ]
+  thunar_objc_args += ['-fobjc-arc']
+endif
+
 thunar_sources += gnome.genmarshal(
   'thunar-marshal',
   sources: 'thunar-marshal.list',
@@ -231,6 +250,9 @@ thunar_dependencies = [
     pango,
     vte
 ]
+if host_machine.system() == 'darwin'
+  thunar_dependencies += dependency('appleframeworks', modules: ['Foundation', 'AppKit', 'UniformTypeIdentifiers'])
+endif
 
 thunar_c_args = [
     '-DG_LOG_DOMAIN="@0@"'.format('thunar'),
@@ -242,6 +264,7 @@ libthunar = static_library(
   thunar_sources,
   sources: xfce_revision_h,
   c_args: thunar_c_args,
+  objc_args: thunar_objc_args,
   include_directories: [
     include_directories('..'),
   ],
@@ -281,11 +304,14 @@ i18n.merge_file(
   install_dir: get_option('prefix') / get_option('datadir') / 'applications',
 )
 
-install_symlink(
-  'Thunar',
-  install_dir: get_option('prefix') / get_option('bindir'),
-  pointing_to: 'thunar',
-)
+# On case-insensitive filesystems (macOS default) 'Thunar' would collide with 'thunar'
+if host_machine.system() != 'darwin'
+  install_symlink(
+    'Thunar',
+    install_dir: get_option('prefix') / get_option('bindir'),
+    pointing_to: 'thunar',
+  )
+endif
 
 install_data(
   'thunar-settings',

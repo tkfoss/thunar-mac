@@ -25,6 +25,35 @@
 
 G_BEGIN_DECLS;
 
+/* Default accelerators that differ on macOS: <Primary> is Command there,
+ * Cmd-Tab and Cmd-H are taken by the system, and Finder conventions are
+ * used where Thunar's defaults rely on keys Mac keyboards lack (Delete). */
+#ifdef __APPLE__
+#define THUNAR_ACCEL_OPEN_PARENT       "<Primary>Up"
+#define THUNAR_ACCEL_BACK              "<Primary>bracketleft"
+#define THUNAR_ACCEL_FORWARD           "<Primary>bracketright"
+#define THUNAR_ACCEL_PREV_TAB_ALT      "<Control><Shift>ISO_Left_Tab"
+#define THUNAR_ACCEL_NEXT_TAB_ALT      "<Control>Tab"
+#define THUNAR_ACCEL_SHOW_HIDDEN       "<Primary><Shift>period"
+#define THUNAR_ACCEL_PROPERTIES        "<Primary>i"
+#define THUNAR_ACCEL_TRASH_DELETE      "<Primary>BackSpace"
+#define THUNAR_ACCEL_DELETE            "<Primary><Alt>BackSpace"
+/* modifier for GtkBindingSet entries ("<Primary>") */
+#define THUNAR_PRIMARY_BINDING_MASK    GDK_META_MASK
+#else
+#define THUNAR_ACCEL_OPEN_PARENT       "<Alt>Up"
+#define THUNAR_ACCEL_BACK              "<Alt>Left"
+#define THUNAR_ACCEL_FORWARD           "<Alt>Right"
+#define THUNAR_ACCEL_PREV_TAB_ALT      "<Primary><Shift>ISO_Left_Tab"
+#define THUNAR_ACCEL_NEXT_TAB_ALT      "<Primary>Tab"
+#define THUNAR_ACCEL_SHOW_HIDDEN       "<Primary>h"
+#define THUNAR_ACCEL_PROPERTIES        "<Alt>Return"
+#define THUNAR_ACCEL_TRASH_DELETE      "Delete"
+#define THUNAR_ACCEL_DELETE            "<Shift>Delete"
+#define THUNAR_PRIMARY_BINDING_MASK    GDK_CONTROL_MASK
+#endif
+
+
 /* clang-format off */
 /* support macros for debugging */
 #ifndef NDEBUG

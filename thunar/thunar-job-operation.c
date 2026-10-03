@@ -731,10 +731,18 @@ thunar_job_operation_restore_from_trash (ThunarJobOperation *operation,
 
       /* get the original path of the file before deletion */
       original_path = g_file_info_get_attribute_byte_string (info, G_FILE_ATTRIBUTE_TRASH_ORIG_PATH);
+      date = g_file_info_get_deletion_date (info);
+      if (original_path == NULL || date == NULL)
+        {
+          /* cannot be matched against the operation */
+          if (date != NULL)
+            g_date_time_unref (date);
+          g_object_unref (info);
+          continue;
+        }
       original_file = g_file_new_for_path (original_path);
 
       /* get the deletion date reported by the file */
-      date = g_file_info_get_deletion_date (info);
       deletion_time = g_date_time_to_unix (date);
       g_date_time_unref (date);
 

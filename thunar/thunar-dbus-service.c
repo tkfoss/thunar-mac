@@ -1089,7 +1089,7 @@ thunar_dbus_service_create_file (ThunarDBusFileManager *object,
 
   /* fall back to plain text file if no content type is provided */
   if (content_type == NULL || *content_type == '\0')
-    content_type = "text/plain";
+    content_type = THUNAR_CONTENT_TYPE_PLAIN_TEXT;
 
   /* popup a new window for the folder */
   application = thunar_application_get ();

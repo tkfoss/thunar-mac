@@ -1070,11 +1070,36 @@ thunar_renamer_dialog_save (ThunarRenamerDialog *renamer_dialog)
 
 
 static gboolean
+trd_media_filter_func (const GtkFileFilterInfo *info,
+                       const gchar             *media)
+{
+  gboolean result = FALSE;
+
+  /* check the MIME type (a UTI on macOS, depending on GTK) */
+  if (info->mime_type != NULL)
+    result = thunar_g_content_type_is_media (info->mime_type, media);
+
+#ifdef __APPLE__
+  /* LaunchServices knows no MIME type for e.g. mkv/flac, guess from the name */
+  if (!result && info->display_name != NULL)
+    {
+      gchar *content_type = g_content_type_guess (info->display_name, NULL, 0, NULL);
+      result = thunar_g_content_type_is_media (content_type, media);
+      g_free (content_type);
+    }
+#endif
+
+  return result;
+}
+
+
+
+static gboolean
 trd_audio_filter_func (const GtkFileFilterInfo *info,
                        gpointer                 data)
 {
   /* check if the MIME type is an audio MIME type */
-  return (strncmp (info->mime_type, "audio/", 6) == 0);
+  return trd_media_filter_func (info, "audio");
 }
 
 
@@ -1084,7 +1109,7 @@ trd_video_filter_func (const GtkFileFilterInfo *info,
                        gpointer                 data)
 {
   /* check if the MIME type is a video MIME type */
-  return (strncmp (info->mime_type, "video/", 6) == 0);
+  return trd_media_filter_func (info, "video");
 }
 
 
@@ -1119,7 +1144,7 @@ thunar_renamer_dialog_action_add_files (ThunarRenamerDialog *renamer_dialog)
 
   filter = gtk_file_filter_new ();
   gtk_file_filter_set_name (filter, _("Audio Files"));
-  gtk_file_filter_add_custom (filter, GTK_FILE_FILTER_MIME_TYPE, trd_audio_filter_func, NULL, NULL);
+  gtk_file_filter_add_custom (filter, GTK_FILE_FILTER_MIME_TYPE | GTK_FILE_FILTER_DISPLAY_NAME, trd_audio_filter_func, NULL, NULL);
   gtk_file_chooser_add_filter (GTK_FILE_CHOOSER (chooser), filter);
 
   filter = gtk_file_filter_new ();
@@ -1129,7 +1154,7 @@ thunar_renamer_dialog_action_add_files (ThunarRenamerDialog *renamer_dialog)
 
   filter = gtk_file_filter_new ();
   gtk_file_filter_set_name (filter, _("Video Files"));
-  gtk_file_filter_add_custom (filter, GTK_FILE_FILTER_MIME_TYPE, trd_video_filter_func, NULL, NULL);
+  gtk_file_filter_add_custom (filter, GTK_FILE_FILTER_MIME_TYPE | GTK_FILE_FILTER_DISPLAY_NAME, trd_video_filter_func, NULL, NULL);
   gtk_file_chooser_add_filter (GTK_FILE_CHOOSER (chooser), filter);
 
   /* check if "current-directory" is set */
@@ -1338,7 +1363,7 @@ thunar_renamer_dialog_button_press_event (GtkWidget           *tree_view,
           if (!gtk_tree_selection_path_is_selected (selection, path))
             {
               /* we don't unselect all other items if Control is active */
-              if ((event->state & GDK_CONTROL_MASK) == 0)
+              if ((event->state & gtk_widget_get_modifier_mask (tree_view, GDK_MODIFIER_INTENT_MODIFY_SELECTION)) == 0)
                 gtk_tree_selection_unselect_all (selection);
               gtk_tree_selection_select_path (selection, path);
             }

@@ -1,0 +1,70 @@
+diff --git a/libxfce4ui/xfce-execute.c b/libxfce4ui/xfce-execute.c
+index 4f18a52..8394144 100644
+--- a/libxfce4ui/xfce-execute.c
++++ b/libxfce4ui/xfce-execute.c
+@@ -21,7 +21,9 @@
+ #include <gdk/gdkx.h>
+ #endif
+ 
++#ifndef __APPLE__
+ #include <gio/gdesktopappinfo.h>
++#endif
+ 
+ #include "xfce-execute.h"
+ #include "libxfce4ui-visibility.h"
+@@ -87,6 +89,11 @@ find_fallback_application_from_rc_file (const gchar *category)
+ static gchar *
+ find_fallback_application_from_xdg_mime (const gchar *category)
+ {
++#ifdef __APPLE__
++  /* macOS: no GDesktopAppInfo / xdg-mime; rely on helpers.rc or PATH */
++  (void) category;
++  return NULL;
++#else
+   const gchar *query = NULL;
+   GDesktopAppInfo *info = NULL;
+ 
+@@ -154,6 +161,7 @@ find_fallback_application_from_xdg_mime (const gchar *category)
+     }
+ 
+   return NULL;
++#endif
+ }
+ 
+ static gchar *
+diff --git a/meson.build b/meson.build
+index f2f6e03..50d63a1 100644
+--- a/meson.build
++++ b/meson.build
+@@ -90,7 +90,14 @@ if enable_wayland
+   feature_cflags += '-DENABLE_WAYLAND=1'
+ endif
+ 
+-if not enable_x11 and not enable_wayland
++# macOS: translations can be relocated (app bundle) with $XFCE_LOCALEDIR
++if host_machine.system() == 'darwin'
++  feature_cflags += '-DPACKAGE_LOCALE_DIR=(g_getenv ("XFCE_LOCALEDIR") != NULL ? g_getenv ("XFCE_LOCALEDIR") : "@0@")'.format(get_option('prefix') / get_option('localedir'))
++else
++  feature_cflags += '-DPACKAGE_LOCALE_DIR="@0@"'.format(get_option('prefix') / get_option('localedir'))
++endif
++
++if not enable_x11 and not enable_wayland and host_machine.system() != 'darwin'
+   error('At least one of the X11 and Wayland backends must be enabled')
+ endif
+ 
+@@ -270,7 +277,6 @@ extra_cflags += [
+   '-DPACKAGE_STRING="@0@ @1@"'.format(meson.project_name(), meson.project_version()),
+   '-DPACKAGE_DATADIR="@0@"'.format(pkgdatadir),
+   '-DCOPYRIGHT_YEAR="@0@"'.format(copyright_year),
+-  '-DPACKAGE_LOCALE_DIR="@0@"'.format(get_option('prefix') / get_option('localedir')),
+   '-DPACKAGE_BUGREPORT="https://gitlab.xfce.org/@0@/@1@/-/issues"'.format(project_namespace, meson.project_name()),
+   '-DGETTEXT_PACKAGE="@0@"'.format(meson.project_name()),
+   '-DPREFIX="@0@"'.format(get_option('prefix')),
+@@ -306,4 +312,6 @@ subdir('po')
+ subdir('tests')
+ subdir('xfce4-about')
+ subdir('xfce-desktop-item-edit')
+-subdir('xfce-open')
++if host_machine.system() != 'darwin'
++  subdir('xfce-open')
++endif

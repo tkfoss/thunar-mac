@@ -20,6 +20,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
+#include "thunar/thunar-app-info.h"
 #include "thunar/thunar-chooser-button.h"
 #include "thunar/thunar-chooser-dialog.h"
 #include "thunar/thunar-dialogs.h"
@@ -310,7 +311,7 @@ thunar_chooser_button_changed (GtkComboBox *combo_box)
       content_type = thunar_file_get_content_type (chooser_button->file);
 
       /* try to set application as default for these kind of file */
-      if (!g_app_info_set_as_default_for_type (app_info, content_type, &error))
+      if (!thunar_app_info_set_as_default_for_type (app_info, content_type, &error))
         {
           /* tell the user that it didn't work */
           if (g_strcmp0 (thunar_file_get_display_name (chooser_button->file), thunar_file_get_basename (chooser_button->file)) != 0)
@@ -459,11 +460,11 @@ thunar_chooser_button_file_changed (ThunarChooserButton *chooser_button,
       g_free (description);
 
       /* determine the default application for that content type */
-      app_info = g_app_info_get_default_for_type (content_type, FALSE);
+      app_info = thunar_app_info_get_default_for_type (content_type, FALSE);
       if (G_LIKELY (app_info != NULL))
         {
           /* determine all applications that claim to be able to handle the file */
-          app_infos = g_app_info_get_all_for_type (content_type);
+          app_infos = thunar_app_info_get_all_for_type (content_type);
           app_infos = g_list_sort (app_infos, thunar_chooser_button_sort_applications);
 
           /* add all possible applications */

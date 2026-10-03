@@ -14,6 +14,7 @@ shared_module(
     'thunar-apr-provider.h',
   ],
   name_prefix: '',
+  name_suffix: thunarx_module_suffix,
   gnu_symbol_visibility: 'hidden',
   c_args: [
     '-DG_LOG_DOMAIN="@0@"'.format('thunar-apr'),

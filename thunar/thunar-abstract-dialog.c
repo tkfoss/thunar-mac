@@ -18,6 +18,7 @@
  */
 
 #include "thunar/thunar-abstract-dialog.h"
+#include "thunar/thunar-private.h"
 
 #include <gdk/gdkkeysyms.h>
 
@@ -43,8 +44,8 @@ thunar_abstract_dialog_class_init (ThunarAbstractDialogClass *klass)
 
   /* connect additional key bindings to the GtkDialog::close action signal */
   binding_set = gtk_binding_set_by_class (klass);
-  gtk_binding_entry_add_signal (binding_set, GDK_KEY_w, GDK_CONTROL_MASK, "close", 0);
-  gtk_binding_entry_add_signal (binding_set, GDK_KEY_W, GDK_CONTROL_MASK, "close", 0);
+  gtk_binding_entry_add_signal (binding_set, GDK_KEY_w, THUNAR_PRIMARY_BINDING_MASK, "close", 0);
+  gtk_binding_entry_add_signal (binding_set, GDK_KEY_W, THUNAR_PRIMARY_BINDING_MASK, "close", 0);
 }
 
 

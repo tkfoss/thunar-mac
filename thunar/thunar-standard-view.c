@@ -3370,7 +3370,7 @@ thunar_standard_view_scroll_event (GtkWidget          *view,
     }
 
   /* zoom-in/zoom-out on control+mouse wheel */
-  if ((event->state & GDK_CONTROL_MASK) != 0 && (scrolling_direction == GDK_SCROLL_UP || scrolling_direction == GDK_SCROLL_DOWN))
+  if ((event->state & (GDK_CONTROL_MASK | gtk_widget_get_modifier_mask (GTK_WIDGET (standard_view), GDK_MODIFIER_INTENT_PRIMARY_ACCELERATOR))) != 0 && (scrolling_direction == GDK_SCROLL_UP || scrolling_direction == GDK_SCROLL_DOWN))
     {
       /* check if we should use ctrl + scroll to zoom */
       g_object_get (G_OBJECT (standard_view->preferences), "misc-ctrl-scroll-wheel-to-zoom", &misc_ctrl_scroll_wheel_to_zoom, NULL);
@@ -4998,7 +4998,7 @@ _thunar_standard_view_open_on_middle_click (ThunarStandardView *standard_view,
           g_object_get (G_OBJECT (standard_view->preferences), "misc-middle-click-in-tab", &in_tab, NULL);
 
           /* holding ctrl inverts the action */
-          if ((event_state & GDK_CONTROL_MASK) != 0)
+          if ((event_state & gtk_widget_get_modifier_mask (GTK_WIDGET (standard_view), GDK_MODIFIER_INTENT_PRIMARY_ACCELERATOR)) != 0)
             in_tab = !in_tab;
 
           window = gtk_widget_get_toplevel (GTK_WIDGET (standard_view));

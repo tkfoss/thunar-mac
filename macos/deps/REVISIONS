@@ -1,0 +1,7 @@
+# Xfce dependencies built from git for the macOS port (read by macos/build.sh).
+# Changing a revision here invalidates the CI cache of the deps prefix.
+# name           revision                                  build      url
+xfce4-dev-tools  efd684aa2667ba34eedfa2e2fabd1f979cbf8533  autotools  https://gitlab.xfce.org/xfce/xfce4-dev-tools.git
+libxfce4util     b270b162f14542ca80b812e5ca374a775cef9dbd  meson      https://gitlab.xfce.org/xfce/libxfce4util.git
+xfconf           b068b9e770b7bfbd097a221dcfd2d74bfaa88640  meson      https://gitlab.xfce.org/xfce/xfconf.git
+libxfce4ui       8b972efdf98526213f8f24f4be27c1fb2ee39a28  meson      https://gitlab.xfce.org/xfce/libxfce4ui.git

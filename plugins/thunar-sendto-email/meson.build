@@ -1,20 +1,21 @@
+tse_sources = ['main.c']
+tse_dependencies = [glib, gtk, libxfce4ui, libxfce4util]
+if host_machine.system() == 'darwin'
+  add_languages('objc', native: false, required: true)
+  tse_sources += ['tse-macos.m', 'tse-macos.h']
+  tse_dependencies += dependency('appleframeworks', modules: ['AppKit'])
+endif
+
 executable(
   'thunar-sendto-email',
-  [
-    'main.c',
-  ],
+  tse_sources,
   c_args: [
     '-DG_LOG_DOMAIN="@0@"'.format('thunar-sendto-email'),
   ],
   include_directories: [
     include_directories('..' / '..'),
   ],
-  dependencies: [
-    glib,
-    gtk,
-    libxfce4ui,
-    libxfce4util,
-  ],
+  dependencies: tse_dependencies,
   install: true,
   install_dir: helper_path_prefix / 'Thunar',
 )

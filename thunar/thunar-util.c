@@ -1451,7 +1451,7 @@ thunar_util_get_statusbar_text_for_single_file (ThunarFile *file)
 
   if (show_filetype == TRUE)
     {
-      if (G_UNLIKELY (content_type != NULL && g_str_equal (content_type, "inode/symlink")))
+      if (G_UNLIKELY (content_type != NULL && g_str_equal (content_type, THUNAR_CONTENT_TYPE_SYMLINK)))
         temp_string = g_strdup (_ ("broken link"));
       else if (G_UNLIKELY (thunar_file_is_symlink (file)))
         temp_string = g_strdup_printf (_ ("link to %s"), thunar_file_get_symlink_target (file));
@@ -1482,7 +1482,7 @@ thunar_util_get_statusbar_text_for_single_file (ThunarFile *file)
     }
   else if (thunar_file_is_local (file)
            && thunar_file_is_regular (file)
-           && g_str_has_prefix (content_type, "image/")) /* bug #2913 */
+           && thunar_g_content_type_is_media (content_type, "image")) /* bug #2913 */
     {
       /* check if the size should be visible in the statusbar, disabled by
        * default to avoid high i/o  */

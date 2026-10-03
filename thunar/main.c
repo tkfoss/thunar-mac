@@ -25,11 +25,14 @@
 #endif
 
 #include <glib/gstdio.h>
-#ifdef HAVE_GIO_UNIX
+#ifdef HAVE_GIO_DESKTOP_APP_INFO
 #include <gio/gdesktopappinfo.h>
 #endif
 
 #include "thunar/thunar-application.h"
+#ifdef __APPLE__
+#include "thunar/thunar-macos.h"
+#endif
 #include "thunar/thunar-gobject-extensions.h"
 #include "thunar/thunar-notify.h"
 #include "thunar/thunar-preferences.h"
@@ -63,6 +66,14 @@ main (int argc, char **argv)
       /* disable get/set properties */
       thunar_preferences_xfconf_init_failed ();
     }
+
+#ifdef __APPLE__
+  /* provide trash:// on top of the macOS Trash (there is no GVfs) */
+  thunar_macos_trash_vfs_register ();
+
+  /* GLib has no volume monitor on macOS: provide mounts below /Volumes */
+  thunar_macos_volume_monitor_register ();
+#endif
 
   /* register additional transformation functions */
   thunar_g_initialize_transformations ();

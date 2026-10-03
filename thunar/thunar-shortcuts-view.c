@@ -725,7 +725,7 @@ thunar_shortcuts_view_button_release_event (GtkWidget      *widget,
           g_object_get (view->preferences, "misc-middle-click-in-tab", &in_tab, NULL);
 
           /* holding ctrl inverts the action */
-          if ((event->state & GDK_CONTROL_MASK) != 0)
+          if ((event->state & gtk_widget_get_modifier_mask (GTK_WIDGET (view), GDK_MODIFIER_INTENT_PRIMARY_ACCELERATOR)) != 0)
             in_tab = !in_tab;
 
           thunar_shortcuts_view_open (view, in_tab ? THUNAR_ACTION_MANAGER_OPEN_AS_NEW_TAB : THUNAR_ACTION_MANAGER_OPEN_AS_NEW_WINDOW, TRUE);

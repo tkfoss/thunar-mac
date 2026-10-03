@@ -32,6 +32,12 @@
 
 #include <gio/gio.h>
 
+#ifdef __APPLE__
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 #ifdef HAVE_GIO_UNIX
 
 #ifdef __linux__
@@ -49,11 +55,14 @@
 
 #endif /* __linux__ */
 
+#ifdef HAVE_GIO_DESKTOP_APP_INFO
 #include <gio/gdesktopappinfo.h>
+#endif
 #include <gio/gunixmounts.h>
 
 #endif /* HAVE_GIO_UNIX */
 
+#include "thunar/thunar-app-info.h"
 #include "thunar/thunar-file.h"
 #include "thunar/thunar-gio-extensions.h"
 #include "thunar/thunar-preferences.h"
@@ -1524,7 +1533,7 @@ thunar_g_app_info_launch (GAppInfo          *info,
           if (update_app_info)
             {
               /* obtain list of last used applications */
-              recommended_app_infos = g_app_info_get_recommended_for_type (content_type);
+              recommended_app_infos = thunar_app_info_get_recommended_for_type (content_type);
               if (recommended_app_infos != NULL)
                 {
                   /* check if the application is already the last used one
@@ -1537,7 +1546,7 @@ thunar_g_app_info_launch (GAppInfo          *info,
             }
 
           /* emit "changed" on the file if we successfully changed the last used application */
-          if (update_app_info && g_app_info_set_as_last_used_for_type (info, content_type, NULL))
+          if (update_app_info && thunar_app_info_set_as_last_used_for_type (info, content_type, NULL))
             thunar_file_changed (file);
 
           g_object_unref (file);
@@ -1564,7 +1573,7 @@ thunar_g_app_info_launch (GAppInfo          *info,
 gboolean
 thunar_g_app_info_should_show (GAppInfo *info)
 {
-#ifdef HAVE_GIO_UNIX
+#ifdef HAVE_GIO_DESKTOP_APP_INFO
   _thunar_return_val_if_fail (G_IS_APP_INFO (info), FALSE);
 
   if (G_IS_DESKTOP_APP_INFO (info))
@@ -1857,6 +1866,235 @@ thunar_g_file_get_link_path_for_symlink (GFile *file_to_link,
 
 
 
+/**
+ * thunar_g_content_type_from_mime_type:
+ * @mime_type : a MIME type (e.g. "inode/directory") or a content type.
+ *
+ * Converts a MIME type (as passed over D-Bus or found in .desktop files)
+ * to a GIO content type. This is the identity on Unix; on macOS it returns
+ * the UTI. Strings that are already content types are returned as is.
+ *
+ * Return value: (transfer full): the content type, free with g_free().
+ **/
+gchar *
+thunar_g_content_type_from_mime_type (const gchar *mime_type)
+{
+  if (mime_type == NULL)
+    return NULL;
+#ifdef __APPLE__
+  /* UTIs never contain a slash, MIME types always do */
+  if (strchr (mime_type, '/') != NULL)
+    {
+      gchar *content_type = g_content_type_from_mime_type (mime_type);
+      if (content_type != NULL)
+        return content_type;
+    }
+#endif
+  return g_strdup (mime_type);
+}
+
+
+
+/**
+ * thunar_g_content_type_get_mime_type:
+ * @content_type : a content type.
+ *
+ * Like g_content_type_get_mime_type(), but on macOS keeps the UTI when no
+ * MIME type is known for it (instead of returning application/octet-stream),
+ * and maps Thunar's directory/broken-link types to their MIME equivalents.
+ *
+ * Return value: (transfer full): the MIME type, free with g_free().
+ **/
+gchar *
+thunar_g_content_type_get_mime_type (const gchar *content_type)
+{
+  if (content_type == NULL)
+    return NULL;
+#ifdef __APPLE__
+  {
+    gchar *mime_type;
+
+    if (strchr (content_type, '/') != NULL)
+      return g_strdup (content_type);
+    if (g_content_type_equals (content_type, THUNAR_CONTENT_TYPE_DIRECTORY))
+      return g_strdup ("inode/directory");
+    if (g_content_type_equals (content_type, THUNAR_CONTENT_TYPE_SYMLINK))
+      return g_strdup ("inode/symlink");
+    if (g_content_type_equals (content_type, "public.text"))
+      return g_strdup ("text/plain"); /* LaunchServices says "text/ *" */
+
+    mime_type = g_content_type_get_mime_type (content_type);
+    if (mime_type == NULL
+        || (strcmp (mime_type, "application/octet-stream") == 0
+            && !g_content_type_is_unknown (content_type)))
+      {
+        g_free (mime_type);
+        return g_strdup (content_type);
+      }
+    return mime_type;
+  }
+#else
+  return g_strdup (content_type);
+#endif
+}
+
+
+
+/**
+ * thunar_g_content_type_equals_mime_type:
+ * @content_type : a content type.
+ * @mime_type    : an exact MIME type, e.g. "text/plain".
+ *
+ * Portable replacement for g_content_type_equals (@content_type, "text/plain").
+ **/
+gboolean
+thunar_g_content_type_equals_mime_type (const gchar *content_type,
+                                        const gchar *mime_type)
+{
+  if (content_type == NULL || mime_type == NULL)
+    return FALSE;
+#ifdef __APPLE__
+  {
+    gboolean result;
+    gchar   *tmp;
+
+    if (g_content_type_equals (content_type, mime_type))
+      return TRUE;
+
+    tmp = g_content_type_get_mime_type (content_type);
+    result = (g_strcmp0 (tmp, mime_type) == 0);
+    g_free (tmp);
+    if (result)
+      return TRUE;
+
+    tmp = g_content_type_from_mime_type (mime_type);
+    result = (tmp != NULL && g_content_type_equals (content_type, tmp));
+    g_free (tmp);
+    return result;
+  }
+#else
+  return g_content_type_equals (content_type, mime_type);
+#endif
+}
+
+
+
+/**
+ * thunar_g_content_type_is_media:
+ * @content_type : a content type.
+ * @media        : a MIME media type without slash, e.g. "image" or "audio".
+ *
+ * Portable replacement for g_str_has_prefix (@content_type, "image/").
+ **/
+gboolean
+thunar_g_content_type_is_media (const gchar *content_type,
+                                const gchar *media)
+{
+  gboolean result;
+  gchar   *tmp;
+
+  if (content_type == NULL || media == NULL)
+    return FALSE;
+
+  tmp = g_strconcat (media, "/", NULL);
+  result = g_str_has_prefix (content_type, tmp);
+  g_free (tmp);
+
+#ifdef __APPLE__
+  if (!result)
+    {
+      /* MIME type known to LaunchServices ... */
+      tmp = g_content_type_get_mime_type (content_type);
+      result = (tmp != NULL && g_str_has_prefix (tmp, media) && tmp[strlen (media)] == '/');
+      g_free (tmp);
+    }
+  if (!result)
+    {
+      /* ... or conformance to the matching UTI (public.image, public.audio, ...) */
+      tmp = g_strconcat (media, "/*", NULL);
+      result = g_content_type_is_mime_type (content_type, tmp);
+      g_free (tmp);
+    }
+#endif
+
+  return result;
+}
+
+
+
+/**
+ * thunar_g_content_type_get_icon:
+ * @content_type : a content type.
+ *
+ * Like g_content_type_get_icon(). On macOS GLib derives icon names from the
+ * MIME type, so UTIs without one (shell scripts, source code, executables,
+ * archives, ...) would all get the generic "application-octet-stream" icon;
+ * prepend generic icon names based on UTI conformance in that case.
+ *
+ * Return value: (transfer full): a #GIcon.
+ **/
+GIcon *
+thunar_g_content_type_get_icon (const gchar *content_type)
+{
+#ifdef __APPLE__
+  /* clang-format off */
+  static const struct
+  {
+    const gchar *uti;
+    const gchar *icon_names[3];
+  } fallbacks[] = {
+    { "public.executable",           { "application-x-executable", NULL } },
+    { "public.script",               { "text-x-script", "application-x-executable", NULL } },
+    { "public.source-code",          { "text-x-script", "text-x-generic", NULL } },
+    { "public.html",                 { "text-html", "text-x-generic", NULL } },
+    { "public.text",                 { "text-x-generic", NULL } },
+    { "public.image",                { "image-x-generic", NULL } },
+    { "public.audio",                { "audio-x-generic", NULL } },
+    { "public.movie",                { "video-x-generic", NULL } },
+    { "public.font",                 { "font-x-generic", NULL } },
+    { "com.apple.disk-image",        { "application-x-cd-image", "media-optical", NULL } },
+    { "public.archive",              { "package-x-generic", NULL } },
+    { "com.apple.package",           { "package-x-generic", NULL } },
+    { "public.presentation",         { "x-office-presentation", NULL } },
+    { "public.spreadsheet",          { "x-office-spreadsheet", NULL } },
+    { "public.composite-content",    { "x-office-document", NULL } },
+  };
+  /* clang-format on */
+  const gchar *const *names;
+  GIcon              *icon;
+  GPtrArray          *array;
+  guint               n, m;
+
+  icon = g_content_type_get_icon (content_type);
+  if (content_type == NULL || g_content_type_is_unknown (content_type) || !G_IS_THEMED_ICON (icon))
+    return icon;
+
+  names = g_themed_icon_get_names (G_THEMED_ICON (icon));
+  if (names == NULL || names[0] == NULL || strcmp (names[0], "application-octet-stream") != 0)
+    return icon;
+
+  for (n = 0; n < G_N_ELEMENTS (fallbacks); n++)
+    if (g_content_type_is_a (content_type, fallbacks[n].uti))
+      {
+        array = g_ptr_array_new ();
+        for (m = 0; fallbacks[n].icon_names[m] != NULL; m++)
+          g_ptr_array_add (array, (gpointer) fallbacks[n].icon_names[m]);
+        for (m = 0; names[m] != NULL; m++)
+          g_ptr_array_add (array, (gpointer) names[m]);
+        g_object_unref (icon);
+        icon = g_themed_icon_new_from_names ((gchar **) array->pdata, array->len);
+        g_ptr_array_free (array, TRUE);
+        break;
+      }
+
+  return icon;
+#else
+  return g_content_type_get_icon (content_type);
+#endif
+}
+
+
+
 static GFileInfo *
 thunar_g_file_get_content_type_query_info (GFile   *gfile,
                                            GError **err)
@@ -1869,6 +2107,85 @@ thunar_g_file_get_content_type_query_info (GFile   *gfile,
                             NULL, err);
   return info;
 }
+
+
+
+#ifdef __APPLE__
+/* Returns a UTI for local regular files LaunchServices could not type by
+ * name (public.data): Mach-O binaries, #! scripts and plain text, similar
+ * to the magic/text sniffing shared-mime-info does on Unix. */
+static gchar *
+thunar_g_file_sniff_content_type (GFile *gfile)
+{
+  static const struct
+  {
+    const gchar *interpreter;
+    const gchar *content_type;
+  } scripts[] = {
+    { "python", "public.python-script" },
+    { "perl", "public.perl-script" },
+    { "ruby", "public.ruby-script" },
+    { "sh", "public.shell-script" }, /* also bash, zsh, ksh, csh ... */
+  };
+  guchar       buf[512];
+  gchar       *path;
+  gssize       n;
+  guint32      magic;
+  const gchar *end;
+  const gchar *nl;
+  gssize       i;
+  int          fd;
+  struct stat  st;
+
+  path = g_file_get_path (gfile);
+  if (path == NULL)
+    return NULL;
+
+  fd = open (path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+  g_free (path);
+  if (fd < 0)
+    return NULL;
+
+  if (fstat (fd, &st) != 0 || !S_ISREG (st.st_mode) || st.st_size == 0)
+    {
+      close (fd);
+      return NULL;
+    }
+
+  n = read (fd, buf, sizeof (buf));
+  close (fd);
+  if (n < 4)
+    return NULL;
+
+  /* Mach-O (thin and universal) */
+  memcpy (&magic, buf, 4);
+  if (magic == 0xfeedface || magic == 0xfeedfacf
+      || magic == 0xcefaedfe || magic == 0xcffaedfe
+      || GUINT32_FROM_BE (magic) == 0xcafebabe)
+    return g_strdup ("public.unix-executable");
+
+  /* interpreter scripts */
+  if (buf[0] == '#' && buf[1] == '!')
+    {
+      nl = memchr (buf, '\n', n);
+      end = nl != NULL ? nl : (const gchar *) buf + n;
+      for (i = 0; i < (gssize) G_N_ELEMENTS (scripts); i++)
+        if (g_strstr_len ((const gchar *) buf, end - (const gchar *) buf, scripts[i].interpreter) != NULL)
+          return g_strdup (scripts[i].content_type);
+      return g_strdup ("public.script");
+    }
+
+  /* plain text: valid UTF-8 (ignoring a cut off last character) without control chars */
+  for (i = 0; i < n; i++)
+    if (buf[i] < 0x20 && buf[i] != '\t' && buf[i] != '\n' && buf[i] != '\r' && buf[i] != '\f' && buf[i] != 0x1b)
+      return NULL;
+  if (!g_utf8_validate ((const gchar *) buf, n, &end)
+      && (n < (gssize) sizeof (buf) || (const guchar *) end < buf + n - 4))
+    return NULL;
+
+  return g_strdup ("public.plain-text");
+}
+#endif
 
 
 
@@ -1905,6 +2222,11 @@ thunar_g_file_get_content_type (GFile *gfile)
               info = thunar_g_file_get_content_type_query_info (link_target, &err);
               g_object_unref (link_target);
             }
+          else
+            {
+              /* dangling target (or loop): treat as broken link below */
+              g_set_error_literal (&err, G_IO_ERROR, G_IO_ERROR_NOT_FOUND, "Broken symbolic link");
+            }
         }
     }
 
@@ -1913,7 +2235,7 @@ thunar_g_file_get_content_type (GFile *gfile)
       if (g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY)
         {
           /* this we known for sure */
-          content_type = g_strdup ("inode/directory");
+          content_type = g_strdup (THUNAR_CONTENT_TYPE_DIRECTORY);
         }
       else
         {
@@ -1933,7 +2255,7 @@ thunar_g_file_get_content_type (GFile *gfile)
           /* The mime-type 'inode/symlink' is  only used for broken links.
            * When the link is functional, the mime-type of the link target will be used */
           if (G_LIKELY (is_symlink && err->code == G_IO_ERROR_NOT_FOUND))
-            content_type = g_strdup ("inode/symlink");
+            content_type = g_strdup (THUNAR_CONTENT_TYPE_SYMLINK);
           else
             {
               gchar *uri = g_file_get_uri (gfile);
@@ -1945,6 +2267,19 @@ thunar_g_file_get_content_type (GFile *gfile)
           g_error_free (err);
         }
     }
+
+#ifdef __APPLE__
+  /* macOS determines UTIs from the file name only, sniff extensionless files */
+  if (content_type != NULL && g_content_type_is_unknown (content_type))
+    {
+      gchar *sniffed = thunar_g_file_sniff_content_type (gfile);
+      if (sniffed != NULL)
+        {
+          g_free (content_type);
+          content_type = sniffed;
+        }
+    }
+#endif
 
   /* fallback */
   if (content_type == NULL)

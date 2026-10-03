@@ -1,0 +1,27 @@
+# Homebrew dependencies of the Thunar macOS port: brew bundle --file=macos/deps/Brewfile
+
+# build tools
+brew "meson"
+brew "ninja"
+brew "pkgconf"
+brew "autoconf"       # xfce4-dev-tools
+brew "automake"
+brew "libtool"
+brew "gnu-sed"        # xfce4-dev-tools scripts need GNU sed
+brew "gettext"        # msgfmt, libintl
+brew "libxslt"        # xsltproc (man pages)
+brew "docbook-xsl"    # stylesheets for xsltproc
+brew "librsvg"        # rsvg-convert (app icon) and the SVG gdk-pixbuf loader
+
+# libraries and runtime
+brew "glib"
+brew "gtk+3"
+brew "gdk-pixbuf"
+brew "pango"
+brew "cairo"
+brew "pcre2"
+brew "libffi"
+brew "libxml2"
+brew "dbus"
+brew "adwaita-icon-theme"
+brew "hicolor-icon-theme"

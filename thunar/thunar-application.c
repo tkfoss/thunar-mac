@@ -59,6 +59,9 @@
 #include "thunar/thunar-gtk-extensions.h"
 #include "thunar/thunar-io-jobs.h"
 #include "thunar/thunar-job-operation-history.h"
+#ifdef __APPLE__
+#include "thunar/thunar-macos.h"
+#endif
 #include "thunar/thunar-preferences.h"
 #include "thunar/thunar-private.h"
 #include "thunar/thunar-progress-dialog.h"
@@ -154,6 +157,13 @@ thunar_application_handle_local_options (GApplication *application,
 static int
 thunar_application_command_line (GApplication            *application,
                                  GApplicationCommandLine *command_line);
+#ifdef __APPLE__
+static void
+thunar_application_open (GApplication *application,
+                         GFile       **files,
+                         gint          n_files,
+                         const gchar  *hint);
+#endif
 static gboolean
 thunar_application_dbus_register (GApplication    *application,
                                   GDBusConnection *connection,
@@ -279,6 +289,11 @@ struct _ThunarApplication
 
   /* reference to the global job operation history */
   ThunarJobOperationHistory *job_operation_history;
+
+#ifdef __APPLE__
+  /* Thunar.app was launched without files and opened its default window */
+  gboolean macos_app_launch;
+#endif
 };
 
 
@@ -318,6 +333,9 @@ thunar_application_class_init (ThunarApplicationClass *klass)
   gapplication_class->handle_local_options = thunar_application_handle_local_options;
   gapplication_class->command_line = thunar_application_command_line;
   gapplication_class->dbus_register = thunar_application_dbus_register;
+#ifdef __APPLE__
+  gapplication_class->open = thunar_application_open;
+#endif
 
   /**
    * ThunarApplication:daemon:
@@ -352,7 +370,13 @@ thunar_application_init (ThunarApplication *application)
   application->progress_dialog = NULL;
   application->preferences = NULL;
 
+#ifdef __APPLE__
+  /* GTK's NSApplication delegate passes files opened from Finder or the Dock
+   * (Apple "odoc" event) to GApplication::open only with HANDLES_OPEN */
+  g_application_set_flags (G_APPLICATION (application), G_APPLICATION_HANDLES_COMMAND_LINE | G_APPLICATION_HANDLES_OPEN);
+#else
   g_application_set_flags (G_APPLICATION (application), G_APPLICATION_HANDLES_COMMAND_LINE);
+#endif
   g_application_add_main_option_entries (G_APPLICATION (application), option_entries);
 
   g_application_set_option_context_parameter_string (G_APPLICATION (application), ("[URL …]"));
@@ -456,7 +480,17 @@ thunar_application_startup (GApplication *gapp)
 
   thunar_application_dbus_init (application);
 
+#ifdef __APPLE__
+  /* before GTK calls [NSApp finishLaunching] */
+  thunar_macos_watch_launch ();
+#endif
+
   G_APPLICATION_CLASS (thunar_application_parent_class)->startup (gapp);
+
+#ifdef __APPLE__
+  /* Thunar.app: translations of GLib/GTK from the bundle (after gtk_init) */
+  thunar_macos_bind_textdomains ();
+#endif
 
   /* connect to the session manager */
   application->session_client = thunar_session_client_new (opt_sm_client_id);
@@ -634,6 +668,13 @@ thunar_application_command_line (GApplication            *gapp,
       goto out;
     }
 
+#ifdef __APPLE__
+  /* Thunar.app without files: files opened from Finder arrive later, in GApplication::open */
+  application->macos_app_launch = (filenames == NULL && open_first_window
+                                   && g_getenv ("THUNAR_MACOS_APP_LAUNCH") != NULL);
+  g_unsetenv ("THUNAR_MACOS_APP_LAUNCH");
+#endif
+
   /* if no filenames are provided, open current directory as default */
   if (!thunar_application_process_filenames (application, cwd, filenames == NULL ? current_directory : filenames, NULL, NULL, &error, THUNAR_APPLICATION_SELECT_FILES))
     {
@@ -729,6 +770,76 @@ out:
   else
     return EXIT_SUCCESS;
 }
+
+
+
+#ifdef __APPLE__
+static void
+thunar_application_open (GApplication *gapp,
+                         GFile       **files,
+                         gint          n_files,
+                         const gchar  *hint)
+{
+  ThunarApplication *application = THUNAR_APPLICATION (gapp);
+  GList             *window_list;
+  gchar            **uris;
+  GError            *error = NULL;
+  gint               first = 0;
+
+  /* when Thunar.app is launched to open files, the window opened for the
+   * default folder is reused for the first file instead of opening a second one */
+  window_list = thunar_application_get_windows (application);
+  if (application->macos_app_launch && !thunar_macos_finished_launching () && window_list != NULL && n_files > 0)
+    {
+      ThunarWindow *window = THUNAR_WINDOW (g_list_last (window_list)->data);
+      ThunarFile   *file = thunar_file_get (files[0], NULL);
+      ThunarFile   *directory = NULL;
+      gboolean      restore_tabs;
+
+      if (file != NULL)
+        directory = thunar_file_is_directory (file) ? g_object_ref (file) : thunar_file_get_parent (file, NULL);
+
+      if (directory != NULL)
+        {
+          /* keep restored tabs, otherwise replace the default folder */
+          g_object_get (G_OBJECT (application->preferences), "last-restore-tabs", &restore_tabs, NULL);
+          if (restore_tabs)
+            thunar_window_notebook_add_new_tab (window, directory, THUNAR_NEW_TAB_BEHAVIOR_SWITCH);
+          else
+            thunar_window_set_current_directory (window, directory, TRUE);
+
+          if (!thunar_file_is_directory (file))
+            {
+              GList select = { files[0], NULL, NULL };
+              thunar_window_show_and_select_files (window, &select);
+            }
+
+          gtk_window_present (GTK_WINDOW (window));
+          g_object_unref (directory);
+          first = 1;
+        }
+
+      if (file != NULL)
+        g_object_unref (file);
+    }
+  application->macos_app_launch = FALSE;
+  g_list_free (window_list);
+
+  if (first >= n_files)
+    return;
+
+  /* like "thunar FILE...": open folders, show other files in their folder */
+  uris = g_new0 (gchar *, n_files - first + 1);
+  for (gint i = first; i < n_files; ++i)
+    uris[i - first] = g_file_get_uri (files[i]);
+  if (!thunar_application_process_filenames (application, "/", uris, NULL, NULL, &error, THUNAR_APPLICATION_SELECT_FILES))
+    {
+      g_warning ("Failed to open files: %s", error->message);
+      g_error_free (error);
+    }
+  g_strfreev (uris);
+}
+#endif
 
 
 
@@ -2253,6 +2364,7 @@ thunar_application_create_file (ThunarApplication     *application,
   gboolean     is_directory;
   GList        path_list;
   gchar       *name;
+  gchar       *ctype;
 
   _thunar_return_if_fail (THUNAR_IS_APPLICATION (application));
   _thunar_return_if_fail (THUNAR_IS_FILE (parent_directory));
@@ -2260,7 +2372,9 @@ thunar_application_create_file (ThunarApplication     *application,
   _thunar_return_if_fail (parent == NULL || GDK_IS_SCREEN (parent) || GTK_IS_WIDGET (parent));
   _thunar_return_if_fail (startup_id != NULL);
 
-  is_directory = (g_strcmp0 (content_type, "inode/directory") == 0);
+  /* callers (e.g. D-Bus) may pass a MIME type, which is not a content type on macOS */
+  ctype = thunar_g_content_type_from_mime_type (content_type);
+  is_directory = g_content_type_equals (ctype, THUNAR_CONTENT_TYPE_DIRECTORY);
 
   if (is_directory)
     {
@@ -2274,7 +2388,8 @@ thunar_application_create_file (ThunarApplication     *application,
     }
 
   /* ask the user to enter a name for the new folder */
-  name = thunar_dialogs_show_create (parent, content_type, dialog_title, thunar_file_get_file (parent_directory), title, startup_id);
+  name = thunar_dialogs_show_create (parent, ctype, dialog_title, thunar_file_get_file (parent_directory), title, startup_id);
+  g_free (ctype);
   if (G_LIKELY (name != NULL))
     {
       path_list.data = g_file_get_child (thunar_file_get_file (parent_directory), name);

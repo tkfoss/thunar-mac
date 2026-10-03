@@ -25,6 +25,7 @@
 #include <string.h>
 #endif
 
+#include "thunar/thunar-app-info.h"
 #include "thunar/thunar-abstract-dialog.h"
 #include "thunar/thunar-application.h"
 #include "thunar/thunar-chooser-dialog.h"
@@ -444,7 +445,7 @@ thunar_chooser_dialog_response (GtkDialog *widget,
       name = g_path_get_basename (custom_command);
 
       /* try to add an application for the custom command */
-      app_info = g_app_info_create_from_commandline (custom_command, name, G_APP_INFO_CREATE_NONE, &error);
+      app_info = thunar_app_info_create_from_commandline (custom_command, name, G_APP_INFO_CREATE_NONE, &error);
 
       /* cleanup */
       g_free (name);
@@ -461,7 +462,7 @@ thunar_chooser_dialog_response (GtkDialog *widget,
         }
 
       /* Check if that application already exists in our list */
-      all_apps = g_app_info_get_all ();
+      all_apps = thunar_app_info_get_all ();
       for (lp = all_apps; lp != NULL; lp = lp->next)
         {
           if (g_strcmp0 (g_app_info_get_name (lp->data), g_app_info_get_name (app_info)) == 0 && g_strcmp0 (g_app_info_get_commandline (lp->data), g_app_info_get_commandline (app_info)) == 0)
@@ -479,7 +480,7 @@ thunar_chooser_dialog_response (GtkDialog *widget,
   if (G_UNLIKELY (app_info == NULL))
     return;
 
-  default_app = g_app_info_get_default_for_type (content_type, FALSE);
+  default_app = thunar_app_info_get_default_for_type (content_type, FALSE);
 
   /* check if we should also set the application as default or
    * if application is opened first time, set it as default application */
@@ -487,7 +488,7 @@ thunar_chooser_dialog_response (GtkDialog *widget,
       || default_app == NULL)
     {
       /* remember the application as default for these kind of file */
-      succeed = g_app_info_set_as_default_for_type (app_info, content_type, &error);
+      succeed = thunar_app_info_set_as_default_for_type (app_info, content_type, &error);
 
       /* verify that we were successful */
       if (G_UNLIKELY (!succeed))
@@ -516,7 +517,7 @@ thunar_chooser_dialog_response (GtkDialog *widget,
   else
     {
       /* simply try to set the app as last used for this type (we do not show any errors here) */
-      if (g_app_info_set_as_last_used_for_type (app_info, content_type, NULL))
+      if (thunar_app_info_set_as_last_used_for_type (app_info, content_type, NULL))
         {
           /* emit "changed" on the file if we successfully changed the default application */
           thunar_file_changed (dialog->file);
@@ -700,7 +701,7 @@ thunar_chooser_dialog_update_header (ThunarChooserDialog *dialog)
       content_type = thunar_file_get_content_type (dialog->file);
       description = g_content_type_get_description (content_type);
 
-      icon = g_content_type_get_icon (content_type);
+      icon = thunar_g_content_type_get_icon (content_type);
       gtk_image_set_from_gicon (GTK_IMAGE (dialog->header_image), icon, GTK_ICON_SIZE_DIALOG);
       g_object_unref (icon);
 

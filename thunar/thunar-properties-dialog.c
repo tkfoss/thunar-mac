@@ -292,7 +292,7 @@ thunar_properties_dialog_class_init (ThunarPropertiesDialogClass *klass)
   /* setup the key bindings for the properties dialog */
   binding_set = gtk_binding_set_by_class (klass);
   gtk_binding_entry_add_signal (binding_set, GDK_KEY_F5, 0, "reload", 0);
-  gtk_binding_entry_add_signal (binding_set, GDK_KEY_r, GDK_CONTROL_MASK, "reload", 0);
+  gtk_binding_entry_add_signal (binding_set, GDK_KEY_r, THUNAR_PRIMARY_BINDING_MASK, "reload", 0);
 }
 
 
@@ -1768,7 +1768,7 @@ thunar_properties_dialog_update_multiple (ThunarPropertiesDialog *dialog)
 
   /* update the content type */
   if (content_type != NULL
-      && !g_content_type_equals (content_type, "inode/symlink"))
+      && !g_content_type_equals (content_type, THUNAR_CONTENT_TYPE_SYMLINK))
     {
       str = g_content_type_get_description (content_type);
       gtk_widget_set_tooltip_text (dialog->kind_label, content_type);
