@@ -50,6 +50,10 @@
 #include "thunar/thunar-text-renderer.h"
 #include "thunar/thunar-util.h"
 
+#ifdef __APPLE__
+#include "thunar/thunar-macos.h"
+#endif
+
 #include <gdk/gdkkeysyms.h>
 #include <libxfce4util/libxfce4util.h>
 
@@ -4017,7 +4021,7 @@ thunar_standard_view_drag_motion (GtkWidget          *view,
                         && thunar_file_is_directory (file)
                         && thunar_file_is_writable (file)))
             {
-              action = gdk_drag_context_get_suggested_action (context);
+              action = thunar_dnd_get_suggested_action (context);
             }
 
           /* reset path if we cannot drop */
@@ -4085,6 +4089,11 @@ thunar_standard_view_drag_begin (GtkWidget          *view,
 
   /* query the list of selected URIs */
   standard_view->priv->drag_g_file_list = thunar_file_list_to_thunar_g_file_list (standard_view->priv->selected_files);
+
+#ifdef __APPLE__
+  /* GTK puts only one URI on the drag pasteboard, add all files */
+  thunar_macos_drag_set_files (standard_view->priv->drag_g_file_list);
+#endif
   if (G_LIKELY (standard_view->priv->drag_g_file_list != NULL))
     {
       /* determine the first selected file */
@@ -4157,6 +4166,10 @@ thunar_standard_view_drag_end (GtkWidget          *view,
   /* release the list of dragged URIs */
   thunar_g_list_free_full (standard_view->priv->drag_g_file_list);
   standard_view->priv->drag_g_file_list = NULL;
+
+#ifdef __APPLE__
+  thunar_macos_drag_set_files (NULL);
+#endif
 }
 
 

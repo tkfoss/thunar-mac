@@ -33,6 +33,11 @@
 #include "thunar/thunar-gobject-extensions.h"
 #include "thunar/thunar-private.h"
 
+#ifdef __APPLE__
+#include "thunar/thunar-gio-extensions.h"
+#include "thunar/thunar-macos.h"
+#endif
+
 #include <libxfce4util/libxfce4util.h>
 
 
@@ -101,6 +106,13 @@ static void
 thunar_clipboard_manager_transfer_files (ThunarClipboardManager *manager,
                                          gboolean                copy,
                                          GList                  *files);
+static void
+thunar_clipboard_manager_release_files (ThunarClipboardManager *manager);
+#ifdef __APPLE__
+static void
+thunar_clipboard_manager_macos_update (ThunarClipboardManager *manager,
+                                       gboolean                force);
+#endif
 
 
 
@@ -122,6 +134,15 @@ struct _ThunarClipboardManager
 
   gboolean files_cutted;
   GList   *files;
+
+#ifdef __APPLE__
+  /* GTK's Quartz clipboard can't transfer files, so the NSPasteboard is used
+   * directly. It has no change notification, its changeCount is polled. */
+  glong  pb_change_count; /* changeCount seen last */
+  glong  pb_owned_count;  /* changeCount after we put files on it */
+  guint  pb_poll_id;
+  gchar *pb_image_mime_type; /* image (not a file) on the pasteboard */
+#endif
 };
 
 typedef struct
@@ -206,6 +227,14 @@ thunar_clipboard_manager_dispose (GObject *object)
 {
   ThunarClipboardManager *manager = THUNAR_CLIPBOARD_MANAGER (object);
 
+#ifdef __APPLE__
+  /* the pasteboard already holds the data, nothing to store */
+  if (manager->pb_poll_id != 0)
+    {
+      g_source_remove (manager->pb_poll_id);
+      manager->pb_poll_id = 0;
+    }
+#else
   /* store the clipboard if we still own it and a clipboard
    * manager is running (gtk_clipboard_store checks this) */
   if (gtk_clipboard_get_owner (manager->clipboard) == object
@@ -216,6 +245,7 @@ thunar_clipboard_manager_dispose (GObject *object)
 
       gtk_clipboard_store (manager->clipboard);
     }
+#endif
 
   (*G_OBJECT_CLASS (thunar_clipboard_manager_parent_class)->dispose) (object);
 }
@@ -235,6 +265,10 @@ thunar_clipboard_manager_finalize (GObject *object)
       g_object_unref (G_OBJECT (lp->data));
     }
   g_list_free (manager->files);
+
+#ifdef __APPLE__
+  g_free (manager->pb_image_mime_type);
+#endif
 
   /* disconnect from the clipboard */
   g_signal_handlers_disconnect_by_func (G_OBJECT (manager->clipboard), thunar_clipboard_manager_owner_changed, manager);
@@ -307,13 +341,57 @@ thunar_clipboard_manager_owner_changed (GtkClipboard           *clipboard,
 
 
 static void
+thunar_clipboard_paste_request_free (ThunarClipboardPasteRequest *request)
+{
+  /* free the request */
+  if (G_LIKELY (request->widget != NULL))
+    g_object_remove_weak_pointer (G_OBJECT (request->widget), (gpointer) &request->widget);
+  if (G_LIKELY (request->new_files_closure != NULL))
+    g_closure_unref (request->new_files_closure);
+  g_object_unref (G_OBJECT (request->manager));
+  g_object_unref (request->target_file);
+  g_slice_free (ThunarClipboardPasteRequest, request);
+}
+
+
+
+/* copies/moves/links @file_list as requested, returns FALSE if the list is empty */
+static gboolean
+thunar_clipboard_manager_paste_file_list (ThunarClipboardPasteRequest *request,
+                                          GList                       *file_list,
+                                          gboolean                     path_copy)
+{
+  ThunarApplication *application;
+
+  if (G_UNLIKELY (file_list == NULL))
+    {
+      /* tell the user that we cannot paste */
+      thunar_dialogs_show_error (request->widget, NULL, _("There is nothing on the clipboard to paste"));
+      return FALSE;
+    }
+
+  application = thunar_application_get ();
+  if (G_UNLIKELY (request->paste_as_link))
+    thunar_application_link_into (application, request->widget, file_list,
+                                  request->target_file, THUNAR_OPERATION_LOG_OPERATIONS, request->new_files_closure);
+  else if (G_LIKELY (path_copy))
+    thunar_application_copy_into (application, request->widget, file_list, request->target_file, THUNAR_OPERATION_LOG_OPERATIONS, request->new_files_closure);
+  else
+    thunar_application_move_into (application, request->widget, file_list, request->target_file, THUNAR_OPERATION_LOG_OPERATIONS, request->new_files_closure);
+  g_object_unref (G_OBJECT (application));
+
+  return TRUE;
+}
+
+
+
+static void
 thunar_clipboard_manager_contents_received (GtkClipboard     *clipboard,
                                             GtkSelectionData *selection_data,
                                             gpointer          user_data)
 {
   ThunarClipboardPasteRequest *request = user_data;
   ThunarClipboardManager      *manager = THUNAR_CLIPBOARD_MANAGER (request->manager);
-  ThunarApplication           *application;
   gboolean                     path_copy = TRUE;
   GList                       *file_list = NULL;
   gchar                       *data;
@@ -342,17 +420,8 @@ thunar_clipboard_manager_contents_received (GtkClipboard     *clipboard,
     }
 
   /* perform the action if possible */
-  if (G_LIKELY (file_list != NULL))
+  if (thunar_clipboard_manager_paste_file_list (request, file_list, path_copy))
     {
-      application = thunar_application_get ();
-      if (G_UNLIKELY (request->paste_as_link))
-        thunar_application_link_into (application, request->widget, file_list,
-                                      request->target_file, THUNAR_OPERATION_LOG_OPERATIONS, request->new_files_closure);
-      else if (G_LIKELY (path_copy))
-        thunar_application_copy_into (application, request->widget, file_list, request->target_file, THUNAR_OPERATION_LOG_OPERATIONS, request->new_files_closure);
-      else
-        thunar_application_move_into (application, request->widget, file_list, request->target_file, THUNAR_OPERATION_LOG_OPERATIONS, request->new_files_closure);
-      g_object_unref (G_OBJECT (application));
       thunar_g_list_free_full (file_list);
 
       /* clear the clipboard if it contained "cutted data"
@@ -369,49 +438,43 @@ thunar_clipboard_manager_contents_received (GtkClipboard     *clipboard,
           thunar_clipboard_manager_owner_changed (manager->clipboard, NULL, manager);
         }
     }
-  else
-    {
-      /* tell the user that we cannot paste */
-      thunar_dialogs_show_error (request->widget, NULL, _("There is nothing on the clipboard to paste"));
-    }
 
-  /* free the request */
-  if (G_LIKELY (request->widget != NULL))
-    g_object_remove_weak_pointer (G_OBJECT (request->widget), (gpointer) &request->widget);
-  if (G_LIKELY (request->new_files_closure != NULL))
-    g_closure_unref (request->new_files_closure);
-  g_object_unref (G_OBJECT (request->manager));
-  g_object_unref (request->target_file);
-  g_slice_free (ThunarClipboardPasteRequest, request);
+  thunar_clipboard_paste_request_free (request);
 }
 
 
 
-void
-thunar_clipboard_manager_image_received (GtkClipboard     *clipboard,
-                                         GtkSelectionData *selection_data,
-                                         gpointer          data)
+/* saves the image @content of @mime_type_name as a new file in the target folder */
+static void
+thunar_clipboard_manager_save_image (ThunarClipboardPasteRequest *request,
+                                     const gchar                 *mime_type_name,
+                                     const gchar                 *content,
+                                     gsize                        length)
 {
-  ThunarClipboardPasteRequest *request = data;
-  g_autofree char             *mime_type_name = gdk_atom_name (request->manager->image_target);
-  GError                      *error = NULL;
-  g_autofree char             *cwd_name = g_file_get_path (request->target_file);
-  g_autoptr (GFile) cwd = g_file_new_for_path (cwd_name);
-  g_autoptr (ThunarFile) current_dir = thunar_file_get (cwd, NULL);
+  GError          *error = NULL;
+  g_autofree char *cwd_name = g_file_get_path (request->target_file);
+  g_autoptr (GFile) cwd = NULL;
+  g_autoptr (ThunarFile) current_dir = NULL;
   g_autofree char *filename_tmp = NULL;
   g_autofree char *filename = NULL;
   g_autofree char *dest_path = NULL;
   g_autoptr (GFile) dest = NULL;
   g_autoptr (GFileOutputStream) output_stream = NULL;
-  char *image_type = NULL;
+  const char *image_type = NULL;
 
-
-
-  if (g_ascii_strncasecmp (IMAGE_TARGET_STRING, mime_type_name, IMAGE_TARGET_LEN) != 0)
+  if (mime_type_name == NULL || g_ascii_strncasecmp (IMAGE_TARGET_STRING, mime_type_name, IMAGE_TARGET_LEN) != 0)
     {
       g_warning ("Tried to paste image but data was not an image");
-      goto out;
+      return;
     }
+
+  if (cwd_name == NULL || content == NULL)
+    return;
+
+  cwd = g_file_new_for_path (cwd_name);
+  current_dir = thunar_file_get (cwd, NULL);
+  if (current_dir == NULL)
+    return;
 
   image_type = mime_type_name + IMAGE_TARGET_LEN;
   filename_tmp = g_strconcat (_("Selection."), image_type, NULL);
@@ -425,29 +488,37 @@ thunar_clipboard_manager_image_received (GtkClipboard     *clipboard,
     {
       g_warning ("%s", error->message);
       g_clear_error (&error);
-      goto out;
+      return;
     }
 
   if (output_stream != NULL)
     {
-      const gchar *content = (const gchar *) gtk_selection_data_get_data (selection_data);
-      gint         length = gtk_selection_data_get_length (selection_data);
-
       if (g_output_stream_write_all (G_OUTPUT_STREAM (output_stream), content, length, NULL, NULL, NULL))
         {
           g_output_stream_close (G_OUTPUT_STREAM (output_stream), NULL, NULL);
         }
     }
+}
 
-out:
-  /* free the request */
-  if (G_LIKELY (request->widget != NULL))
-    g_object_remove_weak_pointer (G_OBJECT (request->widget), (gpointer) &request->widget);
-  if (G_LIKELY (request->new_files_closure != NULL))
-    g_closure_unref (request->new_files_closure);
-  g_object_unref (G_OBJECT (request->manager));
-  g_object_unref (request->target_file);
-  g_slice_free (ThunarClipboardPasteRequest, request);
+
+
+void
+thunar_clipboard_manager_image_received (GtkClipboard     *clipboard,
+                                         GtkSelectionData *selection_data,
+                                         gpointer          data)
+{
+  ThunarClipboardPasteRequest *request = data;
+  g_autofree char             *mime_type_name = NULL;
+  gint                         length = gtk_selection_data_get_length (selection_data);
+
+  if (request->manager->image_target != NULL)
+    mime_type_name = gdk_atom_name (request->manager->image_target);
+
+  if (length >= 0)
+    thunar_clipboard_manager_save_image (request, mime_type_name,
+                                         (const gchar *) gtk_selection_data_get_data (selection_data), length);
+
+  thunar_clipboard_paste_request_free (request);
 }
 
 
@@ -593,13 +664,22 @@ thunar_clipboard_manager_clear_callback (GtkClipboard *clipboard,
                                          gpointer      user_data)
 {
   ThunarClipboardManager *manager = THUNAR_CLIPBOARD_MANAGER (user_data);
-  GList                  *lp;
 
   _thunar_return_if_fail (GTK_IS_CLIPBOARD (clipboard));
   _thunar_return_if_fail (THUNAR_IS_CLIPBOARD_MANAGER (manager));
   _thunar_return_if_fail (manager->clipboard == clipboard);
 
   /* release the pending files */
+  thunar_clipboard_manager_release_files (manager);
+}
+
+
+
+static void
+thunar_clipboard_manager_release_files (ThunarClipboardManager *manager)
+{
+  GList *lp;
+
   for (lp = manager->files; lp != NULL; lp = lp->next)
     {
       g_signal_handlers_disconnect_by_func (G_OBJECT (lp->data), thunar_clipboard_manager_file_destroyed, manager);
@@ -608,6 +688,43 @@ thunar_clipboard_manager_clear_callback (GtkClipboard *clipboard,
   g_list_free (manager->files);
   manager->files = NULL;
 }
+
+
+
+#ifdef __APPLE__
+/* re-reads the pasteboard state if it changed (or @force) */
+static void
+thunar_clipboard_manager_macos_update (ThunarClipboardManager *manager,
+                                       gboolean                force)
+{
+  glong change_count = thunar_macos_pasteboard_change_count ();
+
+  if (!force && change_count == manager->pb_change_count)
+    return;
+  manager->pb_change_count = change_count;
+
+  /* someone else owns the pasteboard now, forget the cut files */
+  if (change_count != manager->pb_owned_count)
+    thunar_clipboard_manager_release_files (manager);
+
+  g_free (manager->pb_image_mime_type);
+  manager->pb_image_mime_type = thunar_macos_pasteboard_image_mime_type ();
+  manager->can_paste = thunar_macos_pasteboard_has_files () || manager->pb_image_mime_type != NULL;
+
+  /* notify listeners that we have a new clipboard state */
+  g_signal_emit (manager, manager_signals[CHANGED], 0);
+  g_object_notify (G_OBJECT (manager), "can-paste");
+}
+
+
+
+static gboolean
+thunar_clipboard_manager_macos_poll (gpointer user_data)
+{
+  thunar_clipboard_manager_macos_update (THUNAR_CLIPBOARD_MANAGER (user_data), FALSE);
+  return G_SOURCE_CONTINUE;
+}
+#endif
 
 
 
@@ -620,12 +737,7 @@ thunar_clipboard_manager_transfer_files (ThunarClipboardManager *manager,
   GList      *lp;
 
   /* release any pending files */
-  for (lp = manager->files; lp != NULL; lp = lp->next)
-    {
-      g_signal_handlers_disconnect_by_func (G_OBJECT (lp->data), thunar_clipboard_manager_file_destroyed, manager);
-      g_object_unref (G_OBJECT (lp->data));
-    }
-  g_list_free (manager->files);
+  thunar_clipboard_manager_release_files (manager);
 
   /* remember the transfer operation */
   manager->files_cutted = !copy;
@@ -637,6 +749,16 @@ thunar_clipboard_manager_transfer_files (ThunarClipboardManager *manager,
       manager->files = g_list_prepend (manager->files, file);
       g_signal_connect (G_OBJECT (file), "destroy", G_CALLBACK (thunar_clipboard_manager_file_destroyed), manager);
     }
+
+#ifdef __APPLE__
+  {
+    GList *file_list = thunar_file_list_to_thunar_g_file_list (manager->files);
+    manager->pb_owned_count = thunar_macos_pasteboard_write_files (file_list, manager->files_cutted);
+    thunar_g_list_free_full (file_list);
+    thunar_clipboard_manager_macos_update (manager, TRUE);
+    return;
+  }
+#endif
 
   /* acquire the CLIPBOARD ownership */
   gtk_clipboard_set_with_owner (manager->clipboard, clipboard_targets,
@@ -692,6 +814,14 @@ thunar_clipboard_manager_get_for_display (GdkDisplay *display)
   manager->clipboard = GTK_CLIPBOARD (g_object_ref (G_OBJECT (clipboard)));
   g_object_set_qdata (G_OBJECT (clipboard), thunar_clipboard_manager_quark, manager);
 
+#ifdef __APPLE__
+  /* look for usable data on the pasteboard, and whenever it changes */
+  manager->pb_owned_count = -1;
+  thunar_clipboard_manager_macos_update (manager, TRUE);
+  manager->pb_poll_id = g_timeout_add (500, thunar_clipboard_manager_macos_poll, manager);
+  return manager;
+#endif
+
   /* listen for the "owner-change" signal on the clipboard */
   g_signal_connect (G_OBJECT (manager->clipboard), "owner-change",
                     G_CALLBACK (thunar_clipboard_manager_owner_changed), manager);
@@ -719,6 +849,10 @@ gboolean
 thunar_clipboard_manager_get_can_paste (ThunarClipboardManager *manager)
 {
   _thunar_return_val_if_fail (THUNAR_IS_CLIPBOARD_MANAGER (manager), FALSE);
+#ifdef __APPLE__
+  /* don't wait for the next poll, e.g. right after copying in Finder */
+  thunar_clipboard_manager_macos_update (manager, FALSE);
+#endif
   return manager->can_paste;
 }
 
@@ -834,6 +968,38 @@ thunar_clipboard_manager_paste_files (ThunarClipboardManager *manager,
     g_object_add_weak_pointer (G_OBJECT (request->widget), (gpointer) &request->widget);
 
   /* schedule the request */
+
+#ifdef __APPLE__
+  {
+    GList   *file_list;
+    gboolean cut = FALSE;
+
+    thunar_clipboard_manager_macos_update (manager, FALSE);
+
+    file_list = thunar_macos_pasteboard_read_files (&cut);
+    if (file_list == NULL && manager->pb_image_mime_type != NULL)
+      {
+        GBytes *bytes = thunar_macos_pasteboard_read_image (manager->pb_image_mime_type);
+        if (bytes != NULL)
+          {
+            gsize         length;
+            gconstpointer content = g_bytes_get_data (bytes, &length);
+            thunar_clipboard_manager_save_image (request, manager->pb_image_mime_type, content, length);
+            g_bytes_unref (bytes);
+          }
+      }
+    else if (thunar_clipboard_manager_paste_file_list (request, file_list, !cut) && cut)
+      {
+        /* cut files can only be pasted once */
+        thunar_macos_pasteboard_clear (manager->pb_owned_count);
+        thunar_clipboard_manager_macos_update (manager, FALSE);
+      }
+
+    thunar_g_list_free_full (file_list);
+    thunar_clipboard_paste_request_free (request);
+    return;
+  }
+#endif
 
   if (manager->image_target != NULL)
     {

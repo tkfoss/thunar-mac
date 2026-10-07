@@ -108,6 +108,35 @@ void thunar_macos_volume_unmount (const gchar              *mount_path,
                                   ThunarMacosLaunchCallback callback,
                                   gpointer                  user_data);
 
+/* thunar-macos-pasteboard.m: files on the general pasteboard (Finder
+ * compatible, one public.file-url item per file) and in drags */
+
+/* Current changeCount of the general pasteboard */
+glong thunar_macos_pasteboard_change_count (void);
+
+/* Put @files (GFiles) on the pasteboard, returns the new changeCount */
+glong thunar_macos_pasteboard_write_files (GList   *files,
+                                          gboolean cut);
+
+/* GFiles on the pasteboard (free with thunar_g_list_free_full), @cut tells
+ * whether Thunar cut them */
+GList *thunar_macos_pasteboard_read_files (gboolean *cut);
+
+/* Whether the pasteboard contains files */
+gboolean thunar_macos_pasteboard_has_files (void);
+
+/* MIME type of an image on the pasteboard that is not a file, or NULL */
+gchar *thunar_macos_pasteboard_image_mime_type (void);
+
+/* Data of the image with @mime_type on the pasteboard, or NULL */
+GBytes *thunar_macos_pasteboard_read_image (const gchar *mime_type);
+
+/* Clear the pasteboard if its changeCount is still @change_count */
+void thunar_macos_pasteboard_clear (glong change_count);
+
+/* GFiles that the next drag from Thunar carries (NULL when it ended) */
+void thunar_macos_drag_set_files (GList *files);
+
 /* thunar-macos-volume-monitor.c: GIO native volume monitor for /Volumes */
 void thunar_macos_volume_monitor_register (void);
 

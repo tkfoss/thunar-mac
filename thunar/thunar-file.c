@@ -53,6 +53,7 @@
 #include "thunar/thunar-application.h"
 #include "thunar/thunar-chooser-dialog.h"
 #include "thunar/thunar-dialogs.h"
+#include "thunar/thunar-dnd.h"
 #include "thunar/thunar-file.h"
 #include "thunar/thunar-gio-extensions.h"
 #include "thunar/thunar-gobject-extensions.h"
@@ -2109,7 +2110,7 @@ thunar_file_accepts_drop (ThunarFile     *file,
     return 0;
 
   /* default to whatever GTK+ thinks for the suggested action */
-  suggested_action = gdk_drag_context_get_suggested_action (context);
+  suggested_action = thunar_dnd_get_suggested_action (context);
 
   /* get the possible actions */
   actions = gdk_drag_context_get_actions (context);

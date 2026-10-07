@@ -40,6 +40,46 @@ dnd_action_selected (GtkWidget     *item,
 
 
 /**
+ * thunar_dnd_get_suggested_action:
+ * @context : a #GdkDragContext.
+ *
+ * Like gdk_drag_context_get_suggested_action(), but always a single action.
+ *
+ * GTK's Quartz backend reports the whole operation mask of the drag source as
+ * the suggested action, e.g. COPY | MOVE | LINK when no modifier key is held
+ * (Option restricts it to COPY, Command to MOVE). Thunar can't perform such a
+ * combination, so one action is picked. COPY is preferred because
+ * thunar_file_accepts_drop() then turns it into MOVE for drops on the same
+ * file system, which is also what Finder does.
+ *
+ * Return value: the suggested #GdkDragAction.
+ **/
+GdkDragAction
+thunar_dnd_get_suggested_action (GdkDragContext *context)
+{
+  GdkDragAction action = gdk_drag_context_get_suggested_action (context);
+
+  /* more than one bit set */
+  if ((action & (action - 1)) != 0)
+    {
+      if ((action & GDK_ACTION_ASK) != 0)
+        return GDK_ACTION_ASK;
+      if ((action & GDK_ACTION_COPY) != 0)
+        return GDK_ACTION_COPY;
+      if ((action & GDK_ACTION_MOVE) != 0)
+        return GDK_ACTION_MOVE;
+      if ((action & GDK_ACTION_LINK) != 0)
+        return GDK_ACTION_LINK;
+      if ((action & GDK_ACTION_PRIVATE) != 0)
+        return GDK_ACTION_PRIVATE;
+    }
+
+  return action;
+}
+
+
+
+/**
  * thunar_dnd_ask:
  * @widget    : the widget on which the drop was performed.
  * @folder    : the #ThunarFile to which the @path_list is being dropped.

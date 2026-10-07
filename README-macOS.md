@@ -21,6 +21,10 @@ It works on macOS 15 (Apple Silicon) for daily use. What's implemented:
 - **Open With:** applications from LaunchServices plus custom commands; default applications can be
   set.
 - **Send To:** `.desktop` targets. "Mail Recipient" composes a message in Mail.
+- **Clipboard and drag and drop:** files are copied and cut through the macOS pasteboard, in
+  Finder's format, so ⌘C/⌘X/⌘V work between Thunar windows, tabs and Finder. Drags carry all
+  selected files. With no modifier key, a drop moves the files on the same disk and copies them
+  otherwise. ⌥ forces a copy and ⌘ forces a move.
 - **Volumes:** mounted volumes under `/Volumes` (USB disks, DMGs, network shares) in the side pane,
   with Eject.
 - **Shortcuts:** macOS keyboard shortcuts (⌘C/⌘V, ⌘↑, ⌘[ ⌘], ⌘⌫, ⇧⌘., ⌘I, …).

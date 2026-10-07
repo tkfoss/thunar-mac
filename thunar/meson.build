@@ -198,6 +198,7 @@ if host_machine.system() == 'darwin'
     'thunar-macos-app-info.h',
     'thunar-macos-bundle.c',
     'thunar-macos-launch.m',
+    'thunar-macos-pasteboard.m',
     'thunar-macos-trash.c',
     'thunar-macos-volume-monitor.c',
     'thunar-macos-volumes.m',

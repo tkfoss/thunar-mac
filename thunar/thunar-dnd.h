@@ -30,6 +30,9 @@ thunar_dnd_ask (GtkWidget    *widget,
                 GList        *path_list,
                 GdkDragAction actions);
 
+GdkDragAction
+thunar_dnd_get_suggested_action (GdkDragContext *context);
+
 gboolean
 thunar_dnd_perform (GtkWidget    *widget,
                     ThunarFile   *file,
